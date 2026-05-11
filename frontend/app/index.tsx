@@ -1,30 +1,119 @@
-import { Text, View, StyleSheet, Image } from "react-native";
+import React, { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, Image, Pressable, Alert } from 'react-native';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import Screen from '../src/components/Screen';
+import Button from '../src/components/Button';
+import { Storage } from '../src/storage';
+import { Profile } from '../src/types';
+import { theme } from '../src/theme';
 
-const EXPO_PUBLIC_BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+export default function Home() {
+  const router = useRouter();
+  const [profile, setProfile] = useState<Profile | null>(null);
 
-export default function Index() {
-  console.log(EXPO_PUBLIC_BACKEND_URL, "EXPO_PUBLIC_BACKEND_URL");
+  useFocusEffect(useCallback(() => {
+    Storage.getProfile().then(setProfile);
+  }, []));
 
   return (
-    <View style={styles.container}>
-      <Image
-        source={require("../assets/images/app-image.png")}
-        style={styles.image}
-      />
-    </View>
+    <Screen testID="home-screen">
+      <View style={styles.header}>
+        <Text style={styles.brand}>SHINOBI ARENA</Text>
+        <Text style={styles.subtitle}>Naruto Card Game</Text>
+        <View style={styles.bar} />
+      </View>
+
+      {profile ? (
+        <View style={styles.profileCard} testID="home-profile-card">
+          {profile.image ? (
+            <Image source={{ uri: profile.image }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, styles.avatarFallback]}>
+              <Ionicons name="person" size={28} color={theme.colors.primary} />
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <Text style={styles.profileName} numberOfLines={1}>{profile.name || 'Sem nome'}</Text>
+            <Text style={styles.profileVillage}>{profile.village}</Text>
+          </View>
+          <Pressable
+            onPress={() => router.push('/profile')}
+            testID="edit-profile-icon-btn"
+            style={({ pressed }) => [styles.editBtn, { opacity: pressed ? 0.7 : 1 }]}
+          >
+            <Ionicons name="create-outline" size={20} color={theme.colors.primary} />
+          </Pressable>
+        </View>
+      ) : null}
+
+      <View style={styles.menu}>
+        <Button
+          title={profile ? 'Editar Perfil' : 'Criar Perfil'}
+          onPress={() => router.push('/profile')}
+          testID="open-profile-btn"
+        />
+        <Button
+          title="Arena"
+          onPress={() => router.push('/arena')}
+          variant="secondary"
+          testID="open-arena-btn"
+        />
+        <Button
+          title="Menu Card"
+          onPress={() => router.push('/menu-card')}
+          variant="secondary"
+          testID="open-menu-card-btn"
+        />
+        <Button
+          title="Modo Online"
+          onPress={() => Alert.alert('Em breve', 'Modo online será implementado futuramente.')}
+          variant="ghost"
+          testID="online-mode-btn"
+        />
+      </View>
+
+      <Text style={styles.footer}>v1.0 Prototype</Text>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0c0c0c",
-    alignItems: "center",
-    justifyContent: "center",
+  header: { alignItems: 'center', marginTop: 24, marginBottom: 24 },
+  brand: {
+    color: theme.colors.textPrimary,
+    fontSize: 38,
+    fontWeight: '900',
+    letterSpacing: 4,
+    textShadowColor: theme.colors.primary,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 18,
   },
-  image: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "contain",
+  subtitle: {
+    color: theme.colors.neon,
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 6,
+    textTransform: 'uppercase',
+    marginTop: 6,
   },
+  bar: {
+    width: 60, height: 3, borderRadius: 3, marginTop: 14,
+    backgroundColor: theme.colors.primary,
+  },
+  profileCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radius.xl,
+    padding: 14,
+    borderWidth: 1, borderColor: theme.colors.border,
+    marginBottom: 20,
+  },
+  avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: theme.colors.bg },
+  avatarFallback: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: theme.colors.border },
+  profileName: { color: '#fff', fontSize: 17, fontWeight: '800' },
+  profileVillage: { color: theme.colors.neon, fontSize: 12, marginTop: 2, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
+  editBtn: { padding: 10, borderRadius: 10, backgroundColor: 'rgba(255,59,0,0.1)' },
+  menu: { gap: 14, marginTop: 8 },
+  footer: { color: theme.colors.textMuted, fontSize: 11, textAlign: 'center', marginTop: 28, letterSpacing: 2 },
 });

@@ -1,0 +1,28 @@
+{
+  "summary": "Frontend-only smoke + critical-flow test of SHINOBI ARENA Expo web preview. Validated home, profile, menu card (Cards & O C.T tabs), card/CT creation, arena chips (time hidden on Boss), battle init alerts/selection, battle turn header, Passar message, persistence after reload, and absence of NaN/Infinity/undefined across screens. All targeted flows passed.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "global", "issues": ["Deprecation warnings in console for shadow*, textShadow*, props.pointerEvents (non-blocking, but should migrate to boxShadow/textShadow/style.pointerEvents to stay future-proof)"]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Optional: migrate shadow*/textShadow* style props to boxShadow/textShadow and replace props.pointerEvents with style.pointerEvents to silence RN-Web deprecation warnings.",
+    "Optional: add testIDs to the Alert.alert buttons (RN-Web renders Alert as a custom modal, not window.confirm). This would allow Playwright to confirm 'Encerrar' end-battle. Currently the dialog listener cannot catch it; not a functional defect, just a testability gap."
+  ],
+  "critical_code_review_comments": [
+    "Buttons on home render with textTransform uppercase via CSS, so innerText is uppercase ('CRIAR PERFIL' etc). Functionally correct — labels match spec, just worth knowing for future text assertions.",
+    "battle.tsx is ~550 lines (Battle screen + PlayModal + CardEditInline + helpers). Consider splitting PlayModal & ChatBubble into their own files for maintainability (still under 700-line guideline)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A", "frontend": "100%"},
+  "seed_data_creation": "Test created 1 profile (Naruto Test / Yukigakure), 1 card (Rasengan with Ck cost=5), and 1 CT (Kakashi rank S, Atk/Def/Ag/Ck/Hp=8/7/9/6/10) in AsyncStorage. These persisted across reload — main agent may want to clear AsyncStorage before further demos.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run mobile viewport 390x844. Use Playwright dialog handler for window-level alerts (Modo Online button), but note Alert.alert with multiple buttons (Encerrar confirm, delete confirms) renders as in-DOM RN-Web modal, not window.confirm. Use the testIDs from review_request. The first match-type chip 1x1 is default; for boss matches use match-1xBoss/2xBoss/3xBoss.",
+  "rca_of_issue": "N/A — no bugs reproduced."
+}
