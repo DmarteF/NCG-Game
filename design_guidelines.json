@@ -1,0 +1,143 @@
+{
+  "theme": "Dark",
+  "archetype": "7 (Electric & Neon) customized for Premium Anime/Ninja aesthetics",
+  "color_palette": {
+    "background": {
+      "base": "#050202",
+      "surface": "#140a0a",
+      "glass": "rgba(10, 5, 5, 0.7)"
+    },
+    "primary": {
+      "default": "#FF3B00",
+      "hover": "#FF5E00",
+      "glow": "rgba(255, 59, 0, 0.4)"
+    },
+    "secondary": {
+      "default": "#E60000",
+      "hover": "#FF1A1A",
+      "glow": "rgba(230, 0, 0, 0.3)"
+    },
+    "accent": {
+      "gold": "#FFD700",
+      "neon_orange": "#FF7300"
+    },
+    "text": {
+      "primary": "#FFFFFF",
+      "secondary": "#B3A3A3",
+      "muted": "#807070",
+      "inverse": "#000000"
+    },
+    "borders": {
+      "subtle": "rgba(255, 59, 0, 0.15)",
+      "active": "rgba(255, 59, 0, 0.5)"
+    }
+  },
+  "typography": {
+    "font_families": {
+      "headings": "Outfit, sans-serif",
+      "body": "Manrope, sans-serif"
+    },
+    "rules": {
+      "h1": "text-4xl md:text-5xl font-bold tracking-tight uppercase",
+      "h2": "text-2xl md:text-3xl font-semibold tracking-tight",
+      "h3": "text-xl font-medium tracking-wide text-primary-default",
+      "body": "text-base font-normal leading-relaxed text-text-secondary",
+      "labels": "text-xs font-bold uppercase tracking-[0.1em] text-text-muted"
+    }
+  },
+  "spacing_and_layout": {
+    "strategy": "Mobile-first, constrained to max-w-md mx-auto on desktop to simulate mobile app experience. Full viewport height.",
+    "container_padding": "px-6 py-8",
+    "gaps": "gap-4 for forms, gap-8 for sections, gap-12 between major screen areas.",
+    "border_radius": {
+      "buttons": "rounded-2xl",
+      "cards": "rounded-3xl",
+      "inputs": "rounded-xl",
+      "badges": "rounded-full"
+    }
+  },
+  "components": {
+    "buttons": {
+      "primary": "w-full py-4 bg-gradient-to-r from-secondary-default to-primary-default text-white rounded-2xl font-bold text-lg shadow-[0_0_15px_rgba(255,59,0,0.3)] hover:shadow-[0_0_25px_rgba(255,59,0,0.5)] transition-all active:scale-95 flex items-center justify-center",
+      "secondary": "w-full py-4 bg-surface border border-primary-default/30 text-primary-default rounded-2xl font-bold text-lg hover:bg-primary-default/10 transition-all active:scale-95",
+      "danger": "bg-red-900/50 border border-red-500/50 text-red-500 hover:bg-red-900/80 hover:text-red-400"
+    },
+    "cards": {
+      "game_card": "relative overflow-hidden rounded-3xl border border-primary-default/20 bg-gradient-to-b from-surface to-base p-4 shadow-[0_4px_20px_rgba(0,0,0,0.5)]",
+      "ct_card": "relative overflow-hidden rounded-3xl border-2 border-accent-gold/40 bg-gradient-to-br from-surface to-base p-4 shadow-[0_0_15px_rgba(255,215,0,0.15)]",
+      "glass_panel": "backdrop-blur-xl bg-glass border border-white/5 rounded-3xl p-6"
+    },
+    "inputs": {
+      "text": "w-full bg-base border border-white/10 rounded-xl px-4 py-3 text-white placeholder-text-muted focus:border-primary-default focus:ring-1 focus:ring-primary-default outline-none transition-all",
+      "select": "w-full bg-base border border-white/10 rounded-xl px-4 py-3 text-white outline-none focus:border-primary-default"
+    },
+    "chat_history": {
+      "team_1": "flex justify-end mb-4",
+      "team_1_bubble": "bg-gradient-to-r from-primary-default/20 to-secondary-default/20 border border-primary-default/30 rounded-2xl rounded-tr-none p-3 max-w-[85%]",
+      "team_2": "flex justify-start mb-4",
+      "team_2_bubble": "bg-white/5 border border-white/10 rounded-2xl rounded-tl-none p-3 max-w-[85%]"
+    }
+  },
+  "pages": {
+    "home": {
+      "layout": "Flex column, centered content, full height. Background uses fire sparks image with heavy dark overlay.",
+      "elements": [
+        "Title: SHINOBI ARENA (Huge, glowing, custom font style) over 'Naruto Card Game' (smaller, tracked out).",
+        "Menu Stack: 'Criar/Editar Perfil', 'Arena', 'Menu Card'.",
+        "Disabled Button: 'Modo Online' (triggers Sonner toast: 'Modo online será implementado futuramente')."
+      ]
+    },
+    "profile": {
+      "layout": "Scrollable flex column with glass panel container.",
+      "elements": [
+        "Avatar Upload Mock (Circular, border dashed primary).",
+        "Name Input.",
+        "Village Selector (Yukigakure, Tsukigakure, Takigakure) displayed as visually distinct selectable cards."
+      ]
+    },
+    "card_menu": {
+      "layout": "Tabs at top ('Cards' | 'O C.T'). List view below with floating action button to create.",
+      "cards_tab": "Form fields: Image (mock), Name, Caption, Effects Select (sem efeito, custo, aumento, custo+aumento, atributo ilimitado), Atk/Def/Ag/Ck/Hp sliders or inputs.",
+      "ct_tab": "Form fields: Image, Rank Select (E,D,C,B,A,S), Attributes, Unlimited Attribute checkbox. Note: Always display as 'O C.T'."
+    },
+    "arena_setup": {
+      "layout": "Settings panel style.",
+      "elements": [
+        "Match Type Grid: 1x1, 1x2, 2x2, 3x1, 3x2, 3x3, 1xBoss, 2xBoss, 3xBoss.",
+        "Turn Time Selector: 10, 20, 30 min.",
+        "Start Button -> routes to Presentation Turn."
+      ]
+    },
+    "presentation_turn": {
+      "layout": "Split screen or dual cards showing Team 1 vs Team 2.",
+      "elements": "Selection of initial O C.T. Logic highlights the one with higher Rank to start."
+    },
+    "battle_arena": {
+      "layout": "WhatsApp-style chat dominating the middle, stats/timer at top, action bar at bottom.",
+      "top_bar": "Timer counting down. Active turn indicator.",
+      "chat_area": "History of played cards (thumbnails + stats summary). Team 1 right, Team 2 left.",
+      "bottom_bar": "Button 'Jogar Carta/O C.T' (opens modal to edit stats before sending), 'Morte', 'Desistir', 'Encerrar'."
+    }
+  },
+  "media_urls": {
+    "background_fire": {
+      "url": "https://images.unsplash.com/photo-1605254252017-c84820fe9913?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NTN8MHwxfHNlYXJjaHwyfHxmaXJlJTIwc3BhcmtzJTIwZGFyayUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzc4NTI3OTIzfDA&ixlib=rb-4.1.0&q=85",
+      "description": "Used as the main app background with heavy black opacity overlay."
+    },
+    "background_sparks": {
+      "url": "https://images.pexels.com/photos/266526/pexels-photo-266526.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "description": "Used for the Arena Battle background."
+    },
+    "abstract_glow": {
+      "url": "https://images.unsplash.com/photo-1774391368462-0b3bcb562021?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDQ2NDN8MHwxfHNlYXJjaHwxfHxuZW9uJTIwZ2xvdyUyMGFic3RyYWN0JTIwZGFya3xlbnwwfHx8fDE3Nzg1Mjc5MjN8MA&ixlib=rb-4.1.0&q=85",
+      "description": "Used as placeholder backgrounds for Cards and O C.T."
+    }
+  },
+  "instructions_to_main_agent": {
+    "framework": "Use React with Tailwind CSS. Follow mobile-first design tightly. Wrap the main app in a max-w-md div horizontally centered on desktop to mimic a mobile phone screen.",
+    "components": "Use Shadcn/UI for Dialogs, Tabs, Inputs, and Selects but strip their default borders and make them dark/glassy. Do not use generic white cards.",
+    "data_testids": "Ensure all buttons, inputs, and interactive elements have appropriate data-testid attributes (e.g., data-testid='create-profile-btn').",
+    "animations": "Use Framer Motion heavily. Cards should have entrance animations (y: 20, opacity: 0 -> y: 0, opacity: 1). Use tap animations (scale: 0.95) on all major buttons.",
+    "logic_mocking": "Since there is no backend mentioned, use React Context or local state to mock the creation of Cards, O.C.T, and Profile. The Battle Arena should just visually simulate the history and turns."
+  }
+}
