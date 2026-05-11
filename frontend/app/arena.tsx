@@ -13,11 +13,22 @@ const NORMAL_MATCHES: MatchType[] = ['1x1', '1x2', '2x2', '3x1', '3x2', '3x3'];
 const BOSS_MATCHES: MatchType[] = ['1xBoss', '2xBoss', '3xBoss'];
 const TIMES = [10, 20, 30];
 
+type ArenaMode = 'select' | 'local';
+
 export default function Arena() {
   const router = useRouter();
+  const [mode, setMode] = useState<ArenaMode>('select');
   const [matchType, setMatchType] = useState<MatchType>('1x1');
   const [turnMinutes, setTurnMinutes] = useState<number>(20);
   const isBoss = matchType.includes('Boss');
+
+  const handleBack = () => {
+    if (mode === 'local') {
+      setMode('select');
+      return;
+    }
+    router.back();
+  };
 
   const start = async () => {
     const cts = await Storage.getCTs();
@@ -31,18 +42,44 @@ export default function Arena() {
     });
   };
 
+  if (mode === 'select') {
+    return (
+      <Screen testID="arena-screen">
+        <Header title="Arena" onBack={handleBack} />
+
+        <View style={styles.panel}>
+          <Text style={styles.title}>Arena</Text>
+          <Text style={styles.subtitle}>Escolha o modo de batalha</Text>
+        </View>
+
+        <View style={styles.modeCards}>
+          <Button
+            title="Modo Local"
+            onPress={() => setMode('local')}
+            testID="arena-local-mode-btn"
+          />
+          <Text style={styles.modeHelp}>Teste e jogue no mesmo aparelho, controlando os lados manualmente.</Text>
+
+          <Button
+            title="Modo Online"
+            onPress={() => router.push('/online')}
+            variant="secondary"
+            testID="arena-online-btn"
+            style={{ marginTop: 8 }}
+          />
+          <Text style={styles.modeHelp}>Crie ou entre em uma sala online 1x1 usando código.</Text>
+        </View>
+      </Screen>
+    );
+  }
+
   return (
-    <Screen testID="arena-screen">
-      <Header title="Arena" onBack={() => router.back()} />
+    <Screen testID="arena-local-config-screen">
+      <Header title="Modo Local" onBack={handleBack} />
 
       <View style={styles.panel}>
-        <Text style={styles.title}>Arena</Text>
-        <Text style={styles.subtitle}>Escolha como deseja lutar</Text>
-      </View>
-
-      <View style={styles.modeBox}>
-        <Text style={styles.modeTitle}>Modo Local</Text>
-        <Text style={styles.modeSubtitle}>Teste no mesmo aparelho</Text>
+        <Text style={styles.title}>Teste Local</Text>
+        <Text style={styles.subtitle}>Configure sua batalha</Text>
       </View>
 
       <Text style={styles.label}>Tipo de luta</Text>
@@ -77,7 +114,6 @@ export default function Arena() {
       </View>
 
       <Button title="Iniciar Luta Local" onPress={start} testID="arena-start-btn" style={{ marginTop: 16 }} />
-      <Button title="Modo Online" onPress={() => router.push('/online')} variant="secondary" testID="arena-online-btn" style={{ marginTop: 12 }} />
     </Screen>
   );
 }
@@ -86,9 +122,8 @@ const styles = StyleSheet.create({
   panel: { backgroundColor: theme.colors.surface, borderRadius: theme.radius.lg, padding: 16, borderWidth: 1, borderColor: theme.colors.border, marginBottom: 16 },
   title: { color: '#fff', fontSize: 22, fontWeight: '900', letterSpacing: 2 },
   subtitle: { color: theme.colors.neon, fontSize: 12, marginTop: 4, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
-  modeBox: { backgroundColor: 'rgba(255,59,0,0.07)', borderRadius: theme.radius.lg, padding: 14, borderWidth: 1, borderColor: theme.colors.border, marginBottom: 16 },
-  modeTitle: { color: '#fff', fontSize: 18, fontWeight: '900', letterSpacing: 2 },
-  modeSubtitle: { color: theme.colors.textMuted, fontSize: 12, marginTop: 4 },
+  modeCards: { gap: 10, marginTop: 8 },
+  modeHelp: { color: theme.colors.textMuted, fontSize: 12, textAlign: 'center', lineHeight: 18, marginBottom: 10 },
   label: { color: theme.colors.textMuted, fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   summary: { marginTop: 20, backgroundColor: 'rgba(255,59,0,0.07)', borderRadius: theme.radius.lg, padding: 14, borderWidth: 1, borderColor: theme.colors.border, gap: 6 },
