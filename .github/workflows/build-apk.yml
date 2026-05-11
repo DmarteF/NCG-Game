@@ -7,6 +7,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    defaults:
+      run:
+        working-directory: frontend
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,8 +23,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Build web app
-        run: npm run build
+      - name: Build Expo app
+        run: npx expo export --platform web
 
       - name: Install Capacitor
         run: npm install @capacitor/core @capacitor/cli @capacitor/android
@@ -31,16 +35,16 @@ jobs:
             npx cap init "NCG Game" "com.ncg.game" --web-dir=dist
           fi
 
-      - name: Add Android platform
+      - name: Add Android
         run: |
           if [ ! -d android ]; then
             npx cap add android
           fi
 
-      - name: Sync Capacitor
+      - name: Sync Android
         run: npx cap sync android
 
-      - name: Grant gradlew permission
+      - name: Grant Gradle Permission
         run: chmod +x android/gradlew
 
       - name: Build APK
@@ -50,4 +54,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: NCG-Game-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: frontend/android/app/build/outputs/apk/debug/app-debug.apk
