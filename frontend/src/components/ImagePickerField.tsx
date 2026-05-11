@@ -19,6 +19,8 @@ export default function ImagePickerField({ value, onChange, label, shape = 'rect
   const [loading, setLoading] = useState(false);
 
   const pick = async () => {
+    if (loading) return;
+
     try {
       if (Platform.OS !== 'web') {
         const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -27,34 +29,40 @@ export default function ImagePickerField({ value, onChange, label, shape = 'rect
           return;
         }
       }
+
       setLoading(true);
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        quality: 0.6,
+        // Do not open the crop/editor screen. This makes image selection more reliable.
+        allowsEditing: false,
+        quality: 0.55,
         base64: true,
       });
-      setLoading(false);
+
       if (result.canceled) return;
       const asset = result.assets?.[0];
       if (!asset) return;
+
       let dataUri: string | undefined;
       if (asset.base64) {
-        const mime = asset.mimeType || (asset.uri?.endsWith('.png') ? 'image/png' : 'image/jpeg');
+        const mime = asset.mimeType || (asset.uri?.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg');
         dataUri = `data:${mime};base64,${asset.base64}`;
       } else if (asset.uri?.startsWith('data:')) {
         dataUri = asset.uri;
       } else {
         dataUri = asset.uri;
       }
+
       if (dataUri && dataUri.startsWith('data:') && dataUri.length > MAX_BYTES * 1.4) {
         Alert.alert('Imagem grande', 'A imagem é muito grande. Tente uma menor.');
         return;
       }
+
       onChange(dataUri);
     } catch (e) {
+      Alert.alert('Erro', 'Não foi possível carregar a imagem. Tente selecionar outra imagem da galeria.');
+    } finally {
       setLoading(false);
-      Alert.alert('Erro', 'Não foi possível carregar a imagem.');
     }
   };
 
@@ -65,10 +73,11 @@ export default function ImagePickerField({ value, onChange, label, shape = 'rect
       {label ? <Text style={styles.label}>{label}</Text> : null}
       <Pressable
         onPress={pick}
+        disabled={loading}
         testID={testID}
         style={({ pressed }) => [
           styles.box,
-          { width: size, height: size, borderRadius: radius, opacity: pressed ? 0.8 : 1 },
+          { width: size, height: size, borderRadius: radius, opacity: pressed || loading ? 0.75 : 1 },
         ]}
       >
         {value ? (
