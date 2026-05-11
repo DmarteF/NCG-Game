@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, Alert, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 
@@ -13,7 +14,9 @@ type Props = {
   testID?: string;
 };
 
-const MAX_BYTES = 3 * 1024 * 1024; // ~3MB after b64
+const MAX_DATA_URI_CHARS = 8 * 1024 * 1024;
+
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export default function ImagePickerField({ value, onChange, label, shape = 'rect', size = 140, testID }: Props) {
   const [loading, setLoading] = useState(false);
@@ -22,45 +25,88 @@ export default function ImagePickerField({ value, onChange, label, shape = 'rect
     if (loading) return;
 
     try {
+      setLoading(true);
+
       if (Platform.OS !== 'web') {
-        const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (!perm.granted) {
-          Alert.alert('Permissão necessária', 'Autorize o acesso à galeria nas configurações para selecionar uma imagem.');
-          return;
+        const currentPerm = await ImagePicker.getMediaLibraryPermissionsAsync();
+
+        if (!currentPerm.granted) {
+          const requestedPerm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+          if (!requestedPerm.granted) {
+            Alert.alert('Permissão necessária', 'Autorize o acesso à galeria para selecionar imagens.');
+            return;
+          }
+
+          await wait(350);
         }
       }
 
-      setLoading(true);
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        // Do not open the crop/editor screen. This makes image selection more reliable.
+        mediaTypes: ['images'],
         allowsEditing: false,
-        quality: 0.55,
-        base64: true,
+        allowsMultipleSelection: false,
+        quality: 0.7,
+        base64: false,
+        exif: false,
+        selectionLimit: 1,
       });
 
-      if (result.canceled) return;
-      const asset = result.assets?.[0];
-      if (!asset) return;
-
-      let dataUri: string | undefined;
-      if (asset.base64) {
-        const mime = asset.mimeType || (asset.uri?.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg');
-        dataUri = `data:${mime};base64,${asset.base64}`;
-      } else if (asset.uri?.startsWith('data:')) {
-        dataUri = asset.uri;
-      } else {
-        dataUri = asset.uri;
+      if (result.canceled) {
+        return;
       }
 
-      if (dataUri && dataUri.startsWith('data:') && dataUri.length > MAX_BYTES * 1.4) {
-        Alert.alert('Imagem grande', 'A imagem é muito grande. Tente uma menor.');
+      const asset = result.assets?.[0];
+
+      if (!asset?.uri) {
+        Alert.alert('Erro', 'Não foi possível ler a imagem selecionada.');
+        return;
+      }
+
+      // Small delay fixes Android gallery race conditions on some devices.
+      await wait(200);
+
+      const fileInfo = await FileSystem.getInfoAsync(asset.uri);
+
+      if (!fileInfo.exists) {
+        Alert.alert('Erro', 'A imagem selecionada não foi encontrada. Tente novamente.');
+        return;
+      }
+
+      let base64: string | null = null;
+
+      try {
+        base64 = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      } catch (e) {
+        Alert.alert('Erro', 'Falha ao carregar imagem da galeria.');
+        return;
+      }
+
+      if (!base64) {
+        Alert.alert('Erro', 'Não foi possível converter a imagem.');
+        return;
+      }
+
+      const lowerUri = asset.uri.toLowerCase();
+
+      const mime = lowerUri.endsWith('.png')
+        ? 'image/png'
+        : lowerUri.endsWith('.webp')
+          ? 'image/webp'
+          : 'image/jpeg';
+
+      const dataUri = `data:${mime};base64,${base64}`;
+
+      if (dataUri.length > MAX_DATA_URI_CHARS) {
+        Alert.alert('Imagem grande', 'Escolha uma imagem menor para evitar falhas.');
         return;
       }
 
       onChange(dataUri);
     } catch (e) {
-      Alert.alert('Erro', 'Não foi possível carregar a imagem. Tente selecionar outra imagem da galeria.');
+      Alert.alert('Erro', 'Falha ao selecionar imagem da galeria.');
     } finally {
       setLoading(false);
     }
@@ -71,26 +117,41 @@ export default function ImagePickerField({ value, onChange, label, shape = 'rect
   return (
     <View style={{ alignItems: 'center', gap: 8 }}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
+
       <Pressable
         onPress={pick}
         disabled={loading}
         testID={testID}
         style={({ pressed }) => [
           styles.box,
-          { width: size, height: size, borderRadius: radius, opacity: pressed || loading ? 0.75 : 1 },
+          {
+            width: size,
+            height: size,
+            borderRadius: radius,
+            opacity: pressed || loading ? 0.75 : 1,
+          },
         ]}
       >
         {value ? (
-          <Image source={{ uri: value }} style={{ width: '100%', height: '100%', borderRadius: radius }} />
+          <Image
+            source={{ uri: value }}
+            style={{ width: '100%', height: '100%', borderRadius: radius }}
+          />
         ) : (
           <View style={{ alignItems: 'center', gap: 6 }}>
             <Ionicons name="image-outline" size={28} color={theme.colors.primary} />
-            <Text style={styles.hint}>{loading ? 'Carregando...' : 'Selecionar da galeria'}</Text>
+            <Text style={styles.hint}>
+              {loading ? 'Carregando...' : 'Selecionar da galeria'}
+            </Text>
           </View>
         )}
       </Pressable>
+
       {value ? (
-        <Pressable onPress={() => onChange(undefined)} testID={testID ? `${testID}-remove` : undefined}>
+        <Pressable
+          onPress={() => onChange(undefined)}
+          testID={testID ? `${testID}-remove` : undefined}
+        >
           <Text style={styles.remove}>Remover</Text>
         </Pressable>
       ) : null}
@@ -99,7 +160,13 @@ export default function ImagePickerField({ value, onChange, label, shape = 'rect
 }
 
 const styles = StyleSheet.create({
-  label: { color: theme.colors.textMuted, fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
+  label: {
+    color: theme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
   box: {
     backgroundColor: theme.colors.surface,
     borderWidth: 1.5,
@@ -109,6 +176,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
-  hint: { color: theme.colors.textMuted, fontSize: 12 },
-  remove: { color: theme.colors.danger, fontSize: 12, fontWeight: '700' },
+  hint: {
+    color: theme.colors.textMuted,
+    fontSize: 12,
+  },
+  remove: {
+    color: theme.colors.danger,
+    fontSize: 12,
+    fontWeight: '700',
+  },
 });
