@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, StyleSheet, Image, Pressable, Alert } from 'react-native';
+import { View, Text, StyleSheet, Image, Pressable } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Screen from '../src/components/Screen';
@@ -64,12 +64,6 @@ export default function Home() {
           onPress={() => router.push('/menu-card')}
           variant="secondary"
           testID="open-menu-card-btn"
-        />
-        <Button
-          title="Modo Online"
-          onPress={() => router.push('/online')}
-          variant="ghost"
-          testID="online-mode-btn"
         />
       </View>
 
