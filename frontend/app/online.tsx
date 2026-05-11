@@ -19,6 +19,7 @@ export default function OnlineLobby() {
   const [turnMinutes, setTurnMinutes] = useState(20);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
+  const [errMsg, setErrMsg] = useState('');
 
   const goWithProfile = async (role: 'host' | 'guest', roomCode: string, turn: number) => {
     const p = await Storage.getProfile();
@@ -41,6 +42,7 @@ export default function OnlineLobby() {
   };
 
   const createRoom = async () => {
+    setErrMsg('');
     try {
       setBusy(true);
       const res = await apiCreateRoom(turnMinutes);
@@ -48,22 +50,27 @@ export default function OnlineLobby() {
       await goWithProfile('host', res.code, turnMinutes);
     } catch (e: any) {
       setBusy(false);
-      Alert.alert('Erro', e?.message || 'Não foi possível criar a sala.');
+      const m = e?.message || 'Não foi possível criar a sala.';
+      setErrMsg(m);
+      Alert.alert('Erro', m);
     }
   };
 
   const joinRoom = async () => {
+    setErrMsg('');
     const c = code.trim().toUpperCase();
-    if (c.length < 4) return Alert.alert('Atenção', 'Digite um código válido.');
+    if (c.length < 4) { setErrMsg('Digite um código válido.'); return Alert.alert('Atenção', 'Digite um código válido.'); }
     try {
       setBusy(true);
       const info = await apiCheckRoom(c);
       setBusy(false);
-      if (info.full) return Alert.alert('Sala cheia', 'Esta sala já está cheia.');
+      if (info.full) { setErrMsg('Sala cheia.'); return Alert.alert('Sala cheia', 'Esta sala já está cheia.'); }
       await goWithProfile('guest', c, info.config?.turnMinutes ?? 20);
     } catch (e: any) {
       setBusy(false);
-      Alert.alert('Erro', e?.message || 'Sala não encontrada.');
+      const m = e?.message || 'Sala não encontrada.';
+      setErrMsg(m);
+      Alert.alert('Erro', m);
     }
   };
 
@@ -106,11 +113,12 @@ export default function OnlineLobby() {
           <Input
             label="Código da sala"
             value={code}
-            onChangeText={(t) => setCode(t.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8))}
+            onChangeText={(t) => { setErrMsg(''); setCode(t.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8)); }}
             placeholder="EX: K7B9X2"
             autoCapitalize="characters"
             testID="online-code-input"
           />
+          {errMsg ? <Text style={styles.errorText} testID="online-error-text">{errMsg}</Text> : null}
           <Button title="Entrar" onPress={joinRoom} loading={busy} testID="online-join-btn" />
           <View style={{ height: 8 }} />
           <Pressable onPress={() => setMode('home')} testID="online-back-mode-btn-2"><Text style={styles.back}>← Voltar</Text></Pressable>
