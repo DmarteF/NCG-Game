@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 2 - Modo Online 1x1 added. Backend (REST /api/rooms + WS /api/ws/{code}) fully validated via pytest (9/9 pass) including create/get rooms, invalid minutes, full-room, unknown room, full WS hello+ready+opponent_joined+relay+disconnect lifecycle. Frontend e2e via 2 browser contexts: Home renders 4 buttons (profile, arena, menu-card, online); 'Modo Online' navigates to /online (no longer Alert); lobby shows Criar/Entrar buttons + hint; create flow generates 6-char code and shows 'Aguardando oponente...'; cancel returns to lobby; guest joining a valid code transitions both host AND guest to 'Apresentação Online' screen with the room code displayed, proving WS handshake + relay work in the browser. Local Teste regression: Home still renders all 4 buttons & profile card unchanged.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Online lobby - invalid code feedback on web",
+        "issue": "When invalid code is submitted on web, backend correctly returns 404 and Alert.alert('Erro','Sala não encontrada.') is invoked, but React Native Web's Alert.alert is NOT mapped to window.alert (default RN-Web behavior just logs to console). Playwright dialog handler did not fire and the message does not appear in the DOM. Functionally works on native, but on web users get no visible error. Consider replacing with an inline error state or polyfilling Alert on web. Native (Expo Go) is unaffected.",
+        "affected_testIDs": ["online-join-btn", "online-code-input"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_rooms_ws.py",
+    "/app/test_reports/pytest/iteration_2.xml"
+  ],
+  "action_items": [
+    "Optional: Replace Alert.alert in /app/frontend/app/online.tsx joinRoom() error path with an inline error Text component (or a Toast) so web users see 'Sala não encontrada.' — currently only logged to console on RN Web.",
+    "No backend or critical frontend changes required. Online 1x1 mode is functioning end-to-end."
+  ],
+  "critical_code_review_comments": [
+    "server.py: ROOMS in-memory dict + asyncio.Lock cleanup (>1h empty rooms) is correct for ephemeral lobbies. Unknown WS code returns {type:'error', code:'not_found'} then closes — good.",
+    "server.py: opponent_disconnected only sent if the room still exists; after both leave, room is popped — correct cleanup.",
+    "online.ts (frontend): uses EXPO_PUBLIC_BACKEND_URL (correct for Expo public env) and replaces http->ws — works in browser, validated via 2-context test.",
+    "online-battle.tsx: advanceTurnFromMe does not increment turn while advanceTurnFromOpponent does — both sides only increment when the OPPONENT acts, keeping turn counters in sync. Logical.",
+    "online-battle.tsx: timer broadcasts 'tick' every 3s; sync is approximate but acceptable for 10/20/30-min turns.",
+    "No MongoDB ObjectId leakage. No hardcoded URLs. testIDs present on all interactive elements."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_rooms_ws.py (new pytest suite for rooms + WS)"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 pytest)",
+    "frontend": "~95% (all flows reach intended screens; only RN-Web Alert visibility caveat noted)"
+  },
+  "seed_data_creation": "None persisted. In-browser localStorage seed attempted but app uses AsyncStorage (IndexedDB on web) so seeded data did not surface; this only affected initial-CT picker visibility in test, not functionality validation (WS handshake & screen transitions confirmed for both sides).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend REST + WebSocket tests live in /app/backend/tests/test_rooms_ws.py. WS base URL is wss://ninja-local-fight.preview.emergentagent.com/api/ws/{CODE}. To test the multi-client frontend flow, use two Playwright contexts (browser.new_context()) since one BrowserContext = one tab session. Profile/CT seeding must use AsyncStorage adapter (IndexedDB on web) — localStorage.setItem will not work. Easier path: drive UI through /profile and /menu-card to create seed data, then go online.",
+  "rca_of_issue": "Invalid-code alert invisible on web: React Native Web's Alert.alert default implementation does not call window.alert; it only logs. Fix is either to add a polyfill (e.g., Alert.alert -> window.alert on Platform.OS==='web') or to render an inline error message in /app/frontend/app/online.tsx."
+}

@@ -67,7 +67,7 @@ export default function Home() {
         />
         <Button
           title="Modo Online"
-          onPress={() => Alert.alert('Em breve', 'Modo online será implementado futuramente.')}
+          onPress={() => router.push('/online')}
           variant="ghost"
           testID="online-mode-btn"
         />
