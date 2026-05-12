@@ -40,7 +40,7 @@ export default function ImagePickerField({ value, onChange, label, shape = 'rect
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
         allowsMultipleSelection: false,
-        quality: 1,
+        quality: 0.7,
         base64: false,
         exif: false,
         selectionLimit: 1,
@@ -57,20 +57,14 @@ export default function ImagePickerField({ value, onChange, label, shape = 'rect
         return;
       }
 
-      // Force safe extension because Android content:// URIs often break extension parsing.
-      const extension = 'jpg';
-      const fileName = `img_${Date.now()}.${extension}`;
-      const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
-
       try {
-        await FileSystem.copyAsync({
-          from: asset.uri,
-          to: permanentUri,
+        const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: FileSystem.EncodingType.Base64,
         });
 
-        onChange(permanentUri);
+        onChange(`data:image/jpeg;base64,${base64}`);
       } catch {
-        onChange(asset.uri);
+        Alert.alert('Erro', 'Não foi possível salvar a imagem.');
       }
     } catch (e) {
       Alert.alert('Erro', 'Não foi possível selecionar a imagem.');
