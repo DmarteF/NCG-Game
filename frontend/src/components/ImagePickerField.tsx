@@ -35,42 +35,53 @@ export default function ImagePickerField({
     try {
       setLoading(true);
 
+      // pede permissão
       const permission =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (!permission.granted) {
         Alert.alert(
           'Permissão necessária',
-          'Permita acesso às fotos para escolher imagens.'
+          'Permita acesso às fotos.'
         );
         return;
       }
 
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: false,
-        quality: 1,
-      });
+      // abre galeria
+      const result =
+        await ImagePicker.launchImageLibraryAsync({
+          mediaTypes:
+            ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: false,
+          quality: 1,
+        });
 
+      // cancelou
       if (result.canceled) {
         return;
       }
 
-      const imageUri = result.assets?.[0]?.uri;
+      // pega URI original
+      const imageUri =
+        result.assets?.[0]?.uri;
 
       if (!imageUri) {
-        Alert.alert('Erro', 'Imagem inválida.');
+        Alert.alert(
+          'Erro',
+          'Imagem inválida.'
+        );
         return;
       }
 
-      // SALVA DIRETO A URI
+      // salva URI ORIGINAL
       onChange(imageUri);
+
     } catch (err) {
       console.log(err);
 
       Alert.alert(
         'Erro',
-        'Não foi possível selecionar a imagem.'
+        'Não foi possível selecionar imagem.'
       );
     } finally {
       setLoading(false);
@@ -83,7 +94,12 @@ export default function ImagePickerField({
       : theme.radius.lg;
 
   return (
-    <View style={{ alignItems: 'center', gap: 8 }}>
+    <View
+      style={{
+        alignItems: 'center',
+        gap: 8,
+      }}
+    >
       {label ? (
         <Text style={styles.label}>
           {label}
@@ -101,7 +117,9 @@ export default function ImagePickerField({
             height: size,
             borderRadius: radius,
             opacity:
-              pressed || loading ? 0.75 : 1,
+              pressed || loading
+                ? 0.75
+                : 1,
           },
         ]}
       >
@@ -139,7 +157,9 @@ export default function ImagePickerField({
 
       {value ? (
         <Pressable
-          onPress={() => onChange(undefined)}
+          onPress={() =>
+            onChange(undefined)
+          }
         >
           <Text style={styles.remove}>
             Remover
