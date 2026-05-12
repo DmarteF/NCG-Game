@@ -17,13 +17,57 @@ export const theme = {
     success: '#22C55E',
     overlay: 'rgba(0,0,0,0.65)',
   },
-  spacing: { xs: 4, sm: 8, md: 16, lg: 24, xl: 32 },
-  radius: { sm: 8, md: 12, lg: 18, xl: 24, pill: 999 },
+  spacing: {
+    xs: 4,
+    sm: 8,
+    md: 16,
+    lg: 24,
+    xl: 32,
+  },
+  radius: {
+    sm: 8,
+    md: 12,
+    lg: 18,
+    xl: 24,
+    pill: 999,
+  },
 };
 
-export const ATTRS = ['Atk', 'Def', 'Dur', 'Ag', 'Ck', 'Hp'] as const;
+export const ATTRS = [
+  'Atk',
+  'Def',
+  'Dur',
+  'Ag',
+  'Ck',
+  'Hp',
+] as const;
+
 export type Attr = typeof ATTRS[number];
-export const RANKS = ['E', 'D', 'C', 'B', 'A', 'S'] as const;
+
+export const RANKS = [
+  'Sem Rank',
+  'E',
+  'D',
+  'C',
+  'B',
+  'A',
+  'S',
+] as const;
+
 export type Rank = typeof RANKS[number];
-export const RANK_ORDER: Record<Rank, number> = { E: 1, D: 2, C: 3, B: 4, A: 5, S: 6 };
-export const VILLAGES = ['Yukigakure', 'Tsukigakure', 'Takigakure'] as const;
+
+export const RANK_ORDER: Record<Rank, number> = {
+  'Sem Rank': 0,
+  E: 1,
+  D: 2,
+  C: 3,
+  B: 4,
+  A: 5,
+  S: 6,
+};
+
+export const VILLAGES = [
+  'Yukigakure',
+  'Tsukigakure',
+  'Takigakure',
+] as const;
