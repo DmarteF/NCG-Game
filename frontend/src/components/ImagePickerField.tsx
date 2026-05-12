@@ -57,17 +57,21 @@ export default function ImagePickerField({ value, onChange, label, shape = 'rect
         return;
       }
 
-      // Persist image inside app storage so it survives app restarts.
       const extension = asset.uri.split('.').pop() || 'jpg';
       const fileName = `img_${Date.now()}.${extension}`;
       const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
 
-      await FileSystem.copyAsync({
-        from: asset.uri,
-        to: permanentUri,
-      });
+      try {
+        await FileSystem.copyAsync({
+          from: asset.uri,
+          to: permanentUri,
+        });
 
-      onChange(permanentUri);
+        onChange(permanentUri);
+      } catch {
+        // Fallback keeps Android picker functional even if file copy fails.
+        onChange(asset.uri);
+      }
     } catch (e) {
       Alert.alert('Erro', 'Não foi possível selecionar a imagem.');
     } finally {
