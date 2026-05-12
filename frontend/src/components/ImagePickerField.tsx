@@ -57,7 +57,8 @@ export default function ImagePickerField({ value, onChange, label, shape = 'rect
         return;
       }
 
-      const extension = asset.uri.split('.').pop() || 'jpg';
+      // Force safe extension because Android content:// URIs often break extension parsing.
+      const extension = 'jpg';
       const fileName = `img_${Date.now()}.${extension}`;
       const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
 
@@ -69,7 +70,6 @@ export default function ImagePickerField({ value, onChange, label, shape = 'rect
 
         onChange(permanentUri);
       } catch {
-        // Fallback keeps Android picker functional even if file copy fails.
         onChange(asset.uri);
       }
     } catch (e) {
