@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, Alert, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 
@@ -56,8 +57,17 @@ export default function ImagePickerField({ value, onChange, label, shape = 'rect
         return;
       }
 
-      // Direct URI loading is more stable on Android than base64 conversion.
-      onChange(asset.uri);
+      // Persist image inside app storage so it survives app restarts.
+      const extension = asset.uri.split('.').pop() || 'jpg';
+      const fileName = `img_${Date.now()}.${extension}`;
+      const permanentUri = `${FileSystem.documentDirectory}${fileName}`;
+
+      await FileSystem.copyAsync({
+        from: asset.uri,
+        to: permanentUri,
+      });
+
+      onChange(permanentUri);
     } catch (e) {
       Alert.alert('Erro', 'Não foi possível selecionar a imagem.');
     } finally {
