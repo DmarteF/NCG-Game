@@ -18,22 +18,45 @@ export type CardEffect =
 
 export type Card = {
   id: string;
+
+  // nome do card
   name: string;
+
+  // rank do card
+  // Sem Rank = utilizável por qualquer C.T
   rank?: Rank | 'Sem Rank';
+
+  // descrição/legenda
   caption: string;
+
+  // imagem
   image?: string;
+
+  // tipo do efeito
   effect: CardEffect;
+
+  // custos
   cost: AttrValues;
+
+  // boosts
   boost: AttrValues;
+
+  // ilimitado
   unlimited: UnlimitedFlags;
 };
 
 export type CT = {
   id: string;
+
   name: string;
+
+  // rank do C.T
   rank: Rank;
+
   image?: string;
+
   attrs: Record<Attr, number>;
+
   unlimited: UnlimitedFlags;
 };
 
@@ -60,20 +83,32 @@ export type PlayedCard = {
 
 export type ChatMsg = {
   id: string;
+
   turn: number;
+
   team: 'team1' | 'team2' | 'system';
+
   timestamp: number;
+
   text?: string;
+
   playedCards?: PlayedCard[];
+
   ctSnapshot?: CT;
+
   ctObservation?: string;
+
   finalAttrs?: Record<Attr, number | 'ilimitado'>;
 };
 
 export type BattleHistoryItem = {
   id: string;
+
   config: BattleConfig;
+
   messages: ChatMsg[];
+
   endedAt: number;
+
   result: string;
 };
