@@ -21,7 +21,7 @@ export const theme = {
   radius: { sm: 8, md: 12, lg: 18, xl: 24, pill: 999 },
 };
 
-export const ATTRS = ['Atk', 'Def', 'Ag', 'Ck', 'Hp'] as const;
+export const ATTRS = ['Atk', 'Def', 'Dur', 'Ag', 'Ck', 'Hp'] as const;
 export type Attr = typeof ATTRS[number];
 export const RANKS = ['E', 'D', 'C', 'B', 'A', 'S'] as const;
 export type Rank = typeof RANKS[number];
