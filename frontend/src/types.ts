@@ -9,11 +9,17 @@ export type Profile = {
 export type AttrValues = Partial<Record<Attr, number>>;
 export type UnlimitedFlags = Partial<Record<Attr, boolean>>;
 
-export type CardEffect = 'none' | 'cost' | 'boost' | 'cost_boost' | 'unlimited';
+export type CardEffect =
+  | 'none'
+  | 'cost'
+  | 'boost'
+  | 'cost_boost'
+  | 'unlimited';
 
 export type Card = {
   id: string;
   name: string;
+  rank?: Rank | 'Sem Rank';
   caption: string;
   image?: string;
   effect: CardEffect;
@@ -32,8 +38,15 @@ export type CT = {
 };
 
 export type MatchType =
-  | '1x1' | '1x2' | '2x2' | '3x1' | '3x2' | '3x3'
-  | '1xBoss' | '2xBoss' | '3xBoss';
+  | '1x1'
+  | '1x2'
+  | '2x2'
+  | '3x1'
+  | '3x2'
+  | '3x3'
+  | '1xBoss'
+  | '2xBoss'
+  | '3xBoss';
 
 export type BattleConfig = {
   matchType: MatchType;
