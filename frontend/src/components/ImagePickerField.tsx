@@ -110,21 +110,36 @@ export default function ImagePickerField({
       const newPath =
         `${folder}${fileName}`;
 
-      // copia REAL da imagem pro app
-      await FileSystem.copyAsync({
-        from: asset.uri,
-        to: newPath,
-      });
+      // Android moderno retorna content://
+// então salvamos manualmente em base64
+const base64 =
+  await FileSystem.readAsStringAsync(
+    asset.uri,
+    {
+      encoding:
+        FileSystem.EncodingType.Base64,
+    }
+  );
 
-      // verifica se salvou
-      const verify =
-        await FileSystem.getInfoAsync(newPath);
+// escreve arquivo REAL dentro do app
+await FileSystem.writeAsStringAsync(
+  newPath,
+  base64,
+  {
+    encoding:
+      FileSystem.EncodingType.Base64,
+  }
+);
 
-      if (!verify.exists) {
-        throw new Error(
-          'Falha ao salvar imagem'
-        );
-      }
+// verifica se salvou
+const verify =
+  await FileSystem.getInfoAsync(newPath);
+
+if (!verify.exists) {
+  throw new Error(
+    'Falha ao salvar imagem'
+  );
+}
 
       // salva caminho permanente
       onChange(newPath);
