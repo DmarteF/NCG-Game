@@ -1,7 +1,7 @@
 // WebSocket client helper for online 1x1 matches
 import { Platform } from 'react-native';
 
-const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const BASE = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://shinobi-arena-api.onrender.com';
 
 export function wsUrl(code: string): string {
   // Replace http(s)://host with ws(s)://host
