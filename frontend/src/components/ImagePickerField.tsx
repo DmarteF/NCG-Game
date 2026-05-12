@@ -6,12 +6,9 @@ import {
   Pressable,
   Image,
   Alert,
-  Platform,
 } from 'react-native';
 
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
-
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
 
@@ -24,9 +21,6 @@ type Props = {
   testID?: string;
 };
 
-const wait = (ms: number) =>
-  new Promise(resolve => setTimeout(resolve, ms));
-
 export default function ImagePickerField({
   value,
   onChange,
@@ -37,124 +31,51 @@ export default function ImagePickerField({
 }: Props) {
   const [loading, setLoading] = useState(false);
 
-  const pick = async () => {
-    if (loading) return;
-
+  async function pickImage() {
     try {
       setLoading(true);
 
-      // pede permissão
-      if (Platform.OS !== 'web') {
-        const perm =
-          await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-        if (!perm.granted) {
-          Alert.alert(
-            'Permissão necessária',
-            'Autorize o acesso às imagens.'
-          );
-          return;
-        }
-
-        await wait(200);
-      }
-
-      // abre galeria
-      const result =
-        await ImagePicker.launchImageLibraryAsync({
-          mediaTypes:
-            ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: false,
-          allowsMultipleSelection: false,
-          quality: 1,
-          base64: false,
-          exif: false,
-          selectionLimit: 1,
-        });
-
-      if (result.canceled) return;
-
-      const asset = result.assets?.[0];
-
-      if (!asset?.uri) {
+      if (!permission.granted) {
         Alert.alert(
-          'Erro',
-          'Imagem inválida.'
+          'Permissão necessária',
+          'Permita acesso às fotos para escolher imagens.'
         );
         return;
       }
 
-      // pasta interna do app
-      const folder =
-        `${FileSystem.documentDirectory}saved_images/`;
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 1,
+      });
 
-      const folderInfo =
-        await FileSystem.getInfoAsync(folder);
-
-      // cria pasta se não existir
-      if (!folderInfo.exists) {
-        await FileSystem.makeDirectoryAsync(
-          folder,
-          {
-            intermediates: true,
-          }
-        );
+      if (result.canceled) {
+        return;
       }
 
-      // nome seguro da imagem
-      const fileName =
-        `img_${Date.now()}_${Math.random()
-          .toString(36)
-          .slice(2, 8)}.jpg`;
+      const imageUri = result.assets?.[0]?.uri;
 
-      const newPath =
-        `${folder}${fileName}`;
+      if (!imageUri) {
+        Alert.alert('Erro', 'Imagem inválida.');
+        return;
+      }
 
-      // Android moderno retorna content://
-// então salvamos manualmente em base64
-const base64 =
-  await FileSystem.readAsStringAsync(
-    asset.uri,
-    {
-      encoding:
-        FileSystem.EncodingType.Base64,
-    }
-  );
-
-// escreve arquivo REAL dentro do app
-await FileSystem.writeAsStringAsync(
-  newPath,
-  base64,
-  {
-    encoding:
-      FileSystem.EncodingType.Base64,
-  }
-);
-
-// verifica se salvou
-const verify =
-  await FileSystem.getInfoAsync(newPath);
-
-if (!verify.exists) {
-  throw new Error(
-    'Falha ao salvar imagem'
-  );
-}
-
-      // salva caminho permanente
-      onChange(newPath);
-
-    } catch (e) {
-      console.log('IMAGE ERROR', e);
+      // SALVA DIRETO A URI
+      onChange(imageUri);
+    } catch (err) {
+      console.log(err);
 
       Alert.alert(
         'Erro',
-        'Não foi possível salvar a imagem.'
+        'Não foi possível selecionar a imagem.'
       );
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   const radius =
     shape === 'circle'
@@ -162,12 +83,7 @@ if (!verify.exists) {
       : theme.radius.lg;
 
   return (
-    <View
-      style={{
-        alignItems: 'center',
-        gap: 8,
-      }}
-    >
+    <View style={{ alignItems: 'center', gap: 8 }}>
       {label ? (
         <Text style={styles.label}>
           {label}
@@ -175,7 +91,7 @@ if (!verify.exists) {
       ) : null}
 
       <Pressable
-        onPress={pick}
+        onPress={pickImage}
         disabled={loading}
         testID={testID}
         style={({ pressed }) => [
@@ -185,9 +101,7 @@ if (!verify.exists) {
             height: size,
             borderRadius: radius,
             opacity:
-              pressed || loading
-                ? 0.75
-                : 1,
+              pressed || loading ? 0.75 : 1,
           },
         ]}
       >
@@ -216,7 +130,7 @@ if (!verify.exists) {
 
             <Text style={styles.hint}>
               {loading
-                ? 'Salvando imagem...'
+                ? 'Carregando...'
                 : 'Selecionar da galeria'}
             </Text>
           </View>
@@ -225,14 +139,7 @@ if (!verify.exists) {
 
       {value ? (
         <Pressable
-          onPress={() =>
-            onChange(undefined)
-          }
-          testID={
-            testID
-              ? `${testID}-remove`
-              : undefined
-          }
+          onPress={() => onChange(undefined)}
         >
           <Text style={styles.remove}>
             Remover
