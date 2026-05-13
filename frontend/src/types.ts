@@ -23,8 +23,8 @@ export type Card = {
   name: string;
 
   // rank do card
-  // Sem Rank = utilizável por qualquer C.T
-  rank?: Rank | 'Sem Rank';
+  // S-R = utilizável por qualquer C.T
+  rank?: Rank | 'S-R';
 
   // descrição/legenda
   caption: string;
