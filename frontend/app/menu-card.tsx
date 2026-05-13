@@ -28,6 +28,7 @@ export default function MenuCard() {
   const [cards, setCards] = useState<Card[]>([]);
   const [cts, setCTs] = useState<CT[]>([]);
   const [search, setSearch] = useState('');
+  const [rankFilter, setRankFilter] = useState('Todos');
   const [selectedCT, setSelectedCT] = useState<CT | null>(null);
 
   const reload = useCallback(() => {
@@ -83,26 +84,41 @@ export default function MenuCard() {
     ]);
   };
 
-  const filteredCards = useMemo(() => {
-    return cards.filter((card) => {
-      const matchesSearch = card.name
-        .toLowerCase()
-        .includes(search.toLowerCase());
+const filteredCards = useMemo(() => {
+  return cards.filter((card) => {
+    const cardRank = card.rank || 'S-R';
 
-      if (!selectedCT) return matchesSearch;
+    const matchesSearch = card.name
+      .toLowerCase()
+      .includes(search.toLowerCase());
 
-      const cardRank = card.rank || 'Sem Rank';
+    const matchesRank =
+      rankFilter === 'Todos'
+        ? true
+        : cardRank === rankFilter;
 
-      if (cardRank === 'Sem Rank') {
-        return matchesSearch;
-      }
+    if (!selectedCT) {
+      return matchesSearch && matchesRank;
+    }
 
-      return (
-        matchesSearch &&
-        RANK_ORDER[cardRank] <= RANK_ORDER[selectedCT.rank]
-      );
-    });
-  }, [cards, search, selectedCT]);
+    const allowed =
+  cardRank === 'S-R'
+    ? true
+    : RANK_ORDER[cardRank as keyof typeof RANK_ORDER] <=
+      RANK_ORDER[selectedCT.rank];
+
+    return (
+      matchesSearch &&
+      matchesRank &&
+      allowed
+    );
+  });
+}, [
+  cards,
+  search,
+  rankFilter,
+  selectedCT,
+]);
 
   return (
     <Screen scroll={false} testID="menu-card-screen">
@@ -134,6 +150,48 @@ export default function MenuCard() {
             style={styles.searchInput}
           />
 
+<View style={styles.rankFilterWrap}>
+  <FlatList
+    horizontal
+    showsHorizontalScrollIndicator={false}
+    data={[
+      'Todos',
+      'S-R',
+      'E',
+      'D',
+      'C',
+      'B',
+      'A',
+      'S',
+    ]}
+    keyExtractor={(i) => i}
+    contentContainerStyle={{ gap: 10 }}
+    renderItem={({ item }) => {
+      const active = rankFilter === item;
+
+      return (
+        <Pressable
+          onPress={() => setRankFilter(item)}
+          style={[
+            styles.rankChip,
+            active && styles.rankChipActive,
+          ]}
+        >
+          <Text
+            style={[
+              styles.rankChipText,
+              active &&
+                styles.rankChipTextActive,
+            ]}
+          >
+            {item}
+          </Text>
+        </Pressable>
+      );
+    }}
+  />
+</View>
+          
           {cts.length > 0 && (
             <View style={styles.ctSelector}>
               <Text style={styles.selectorTitle}>
@@ -314,7 +372,7 @@ function CardItem({
 
         <View style={styles.rankBadge}>
           <Text style={styles.rankBadgeText}>
-            {card.rank || 'Sem Rank'}
+            {card.rank || 'S-R'}
           </Text>
         </View>
       </View>
@@ -503,6 +561,34 @@ function describeCardEffects(card: Card): string {
 }
 
 const styles = StyleSheet.create({
+
+  rankFilterWrap: {
+  marginBottom: 16,
+},
+
+rankChip: {
+  paddingHorizontal: 14,
+  paddingVertical: 10,
+  borderRadius: 999,
+  backgroundColor: theme.colors.surface,
+  borderWidth: 1,
+  borderColor: theme.colors.border,
+},
+
+rankChipActive: {
+  backgroundColor: 'rgba(255,59,0,0.25)',
+  borderColor: theme.colors.primary,
+},
+
+rankChipText: {
+  color: theme.colors.textSecondary,
+  fontWeight: '700',
+},
+
+rankChipTextActive: {
+  color: '#fff',
+},
+  
   tabs: {
     flexDirection: 'row',
     backgroundColor: theme.colors.surface,
