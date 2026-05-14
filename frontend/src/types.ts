@@ -20,6 +20,8 @@ export type Card = {
   rank: CardRank;
   effect: CardEffect;
   entityType?: EntityType;
+  entityAttrs?: Record<Attr, number>;
+  entityUnlimited?: UnlimitedFlags;
   cost: AttrValues;
   boost: AttrValues;
   unlimited: UnlimitedFlags;

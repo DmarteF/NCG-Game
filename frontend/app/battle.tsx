@@ -7,7 +7,7 @@ import Button from '../src/components/Button';
 import Input from '../src/components/Input';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
-import { Card, CT, ChatMsg, MatchType, PlayedCard } from '../src/types';
+import { BattleEntity, Card, CT, ChatMsg, MatchType, PlayedCard } from '../src/types';
 import { ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CT_RANKS, CardRank, Rank } from '../src/theme';
 import { AttrEditor, UnlimitedEditor, sanitizeNum } from './card-edit';
 
@@ -106,10 +106,10 @@ export default function Battle() {
     });
   };
 
-  const onSendPlay = (played: PlayedCard[], ctSnap: CT, observation: string, finalAttrs: Record<Attr, number | 'ilimitado'>) => {
+  const onSendPlay = (played: PlayedCard[], ctSnap: CT, observation: string, finalAttrs: Record<Attr, number | 'ilimitado'>, activeEntity?: BattleEntity) => {
     const msg: ChatMsg = {
       id: uid(), turn, team: currentTeam, timestamp: Date.now(),
-      playedCards: played, ctSnapshot: ctSnap, ctObservation: observation, finalAttrs,
+      playedCards: played, ctSnapshot: ctSnap, activeEntitySnapshot: activeEntity, ctObservation: observation, finalAttrs,
     };
     setMessages((m) => [...m, msg]);
     advanceTurn();
@@ -223,9 +223,9 @@ export default function Battle() {
         cards={cards}
         cts={cts}
         onImagePress={setZoomImage}
-        onConfirm={(played, ctSnap, obs, finalAttrs) => {
+        onConfirm={(played, ctSnap, obs, finalAttrs, activeEntity) => {
           setPickerVisible(false);
-          onSendPlay(played, ctSnap, obs, finalAttrs);
+          onSendPlay(played, ctSnap, obs, finalAttrs, activeEntity);
         }}
       />
       <ImageZoomModal uri={zoomImage} onClose={() => setZoomImage(null)} />
@@ -307,6 +307,15 @@ function ChatBubble({ msg, t2Label, onImagePress }: { msg: ChatMsg; t2Label: str
             {msg.ctObservation ? <Text style={styles.obs}>Obs: {msg.ctObservation}</Text> : null}
           </View>
         )}
+        {msg.activeEntitySnapshot ? (
+          <View style={styles.entityBlock}>
+            <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+              <ZoomableThumb uri={msg.activeEntitySnapshot.image} onPress={onImagePress} />
+              <Text style={styles.cardName}>{msg.activeEntitySnapshot.entityType || 'entidade'} {msg.activeEntitySnapshot.name} — Rank {msg.activeEntitySnapshot.rank}</Text>
+            </View>
+            <Text style={styles.obs}>Custos/aumentos aplicados na entidade ativa.</Text>
+          </View>
+        ) : null}
 
         <Text style={styles.time}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
       </View>
@@ -364,16 +373,46 @@ function canCTUseCard(ct: CT | null, card: Card) {
   return order[card.rank || 'E'] <= order[ct.rank];
 }
 
+function entityFromCard(card: Card): BattleEntity {
+  return {
+    id: `${card.id}:entity`,
+    name: card.name,
+    image: card.image,
+    rank: card.rank || 'E',
+    attrs: { Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0, ...(card.entityAttrs || {}) },
+    unlimited: { ...(card.entityUnlimited || {}) },
+    sourceCardId: card.id,
+    entityType: card.entityType,
+  };
+}
+
+function computeFinalAttrs(target: CT | BattleEntity, selectedCards: Card[]) {
+  const finalAttrs: Record<Attr, number | 'ilimitado'> = {} as any;
+  for (const a of ATTRS) {
+    if (target.unlimited[a]) { finalAttrs[a] = 'ilimitado'; continue; }
+    let v = sanitizeNum(String(target.attrs[a] ?? 0));
+    let unl = false;
+    for (const c of selectedCards) {
+      if (c.unlimited[a]) { unl = true; break; }
+      if (c.cost[a] != null) v -= (c.cost[a] as number);
+      if (c.boost[a] != null) v += (c.boost[a] as number);
+    }
+    finalAttrs[a] = unl ? 'ilimitado' : (isFinite(v) ? v : 0);
+  }
+  return finalAttrs;
+}
+
 // ====== Play Modal ======
 function PlayModal({ visible, onClose, cards, cts, onImagePress, onConfirm }:
   { visible: boolean; onClose: () => void; cards: Card[]; cts: CT[];
     onImagePress: (uri: string) => void;
-    onConfirm: (p: PlayedCard[], ct: CT, obs: string, finalAttrs: Record<Attr, number | 'ilimitado'>) => void }) {
+    onConfirm: (p: PlayedCard[], ct: CT, obs: string, finalAttrs: Record<Attr, number | 'ilimitado'>, activeEntity?: BattleEntity) => void }) {
 
   const [step, setStep] = useState<'cards' | 'card-edit' | 'ct-pick' | 'ct-edit'>('cards');
   const [selectedCards, setSelectedCards] = useState<Card[]>([]);
   const [editIdx, setEditIdx] = useState(0);
   const [selectedCT, setSelectedCT] = useState<CT | null>(null);
+  const [activeEntityId, setActiveEntityId] = useState<string | null>(null);
   const [observation, setObservation] = useState('');
   const [cardQuery, setCardQuery] = useState('');
   const [cardRanks, setCardRanks] = useState<CardRank[]>([]);
@@ -382,7 +421,7 @@ function PlayModal({ visible, onClose, cards, cts, onImagePress, onConfirm }:
 
   useEffect(() => {
     if (visible) {
-      setStep('cards'); setSelectedCards([]); setEditIdx(0); setSelectedCT(null); setObservation('');
+      setStep('cards'); setSelectedCards([]); setEditIdx(0); setSelectedCT(null); setActiveEntityId(null); setObservation('');
       setCardQuery(''); setCardRanks([]); setCTQuery(''); setCTRanks([]);
     }
   }, [visible]);
@@ -390,7 +429,7 @@ function PlayModal({ visible, onClose, cards, cts, onImagePress, onConfirm }:
   const toggleCard = (c: Card) => {
     setSelectedCards((arr) => arr.some(x => x.id === c.id)
       ? arr.filter(x => x.id !== c.id)
-      : [...arr, { ...c, cost: { ...c.cost }, boost: { ...c.boost }, unlimited: { ...c.unlimited } }]);
+      : [...arr, { ...c, cost: { ...c.cost }, boost: { ...c.boost }, unlimited: { ...c.unlimited }, entityAttrs: c.entityAttrs ? { ...c.entityAttrs } : undefined, entityUnlimited: c.entityUnlimited ? { ...c.entityUnlimited } : undefined }]);
   };
   const updateCard = (patch: Partial<Card>) => {
     setSelectedCards(arr => arr.map((c, i) => i === editIdx ? { ...c, ...patch } : c));
@@ -423,23 +462,16 @@ function PlayModal({ visible, onClose, cards, cts, onImagePress, onConfirm }:
     const rankOk = ctRanks.length === 0 || ctRanks.includes(ct.rank);
     return queryOk && rankOk;
   });
+  const entities = selectedCards.filter(c => c.entityType).map(entityFromCard);
+  const activeEntity = entities.find(e => e.id === activeEntityId);
 
   const confirmPlay = () => {
     if (!selectedCT) { Alert.alert('Atenção', 'Selecione O C.T para enviar.'); return; }
-    // compute final attrs
-    const finalAttrs: Record<Attr, number | 'ilimitado'> = {} as any;
-    for (const a of ATTRS) {
-      if (selectedCT.unlimited[a]) { finalAttrs[a] = 'ilimitado'; continue; }
-      let v = sanitizeNum(String(selectedCT.attrs[a] ?? 0));
-      let unl = false;
-      for (const c of selectedCards) {
-        if (c.unlimited[a]) { unl = true; break; }
-        if (c.cost[a] != null) v -= (c.cost[a] as number);
-        if (c.boost[a] != null) v += (c.boost[a] as number);
-      }
-      finalAttrs[a] = unl ? 'ilimitado' : (isFinite(v) ? v : 0);
-    }
-    onConfirm(selectedCards.map(c => ({ cardSnapshot: c })), selectedCT, observation.trim(), finalAttrs);
+    const target = activeEntity || selectedCT;
+    const finalAttrs = computeFinalAttrs(target, selectedCards);
+    const targetNote = activeEntity ? `Alvo ativo: ${activeEntity.entityType || 'entidade'} ${activeEntity.name}.` : 'Alvo ativo: O C.T principal.';
+    const obs = [targetNote, observation.trim()].filter(Boolean).join(' ');
+    onConfirm(selectedCards.map(c => ({ cardSnapshot: c })), selectedCT, obs, finalAttrs, activeEntity);
   };
 
   return (
@@ -517,6 +549,29 @@ function PlayModal({ visible, onClose, cards, cts, onImagePress, onConfirm }:
             {step === 'ct-edit' && selectedCT && (
               <View>
                 <Text style={styles.label}>Editar O C.T (apenas esta jogada)</Text>
+                {entities.length > 0 ? (
+                  <View>
+                    <Text style={styles.label}>Alvo dos custos/aumentos</Text>
+                    <View style={styles.chipsRow}>
+                      <Chip label="O C.T principal" active={!activeEntityId} onPress={() => setActiveEntityId(null)} testID="play-target-ct" />
+                      {entities.map(entity => (
+                        <Chip
+                          key={entity.id}
+                          label={`${entity.entityType || 'entidade'} ${entity.name}`}
+                          active={activeEntityId === entity.id}
+                          onPress={() => setActiveEntityId(entity.id)}
+                          testID={`play-target-entity-${entity.sourceCardId}`}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+                {activeEntity ? (
+                  <View style={styles.entityBlock}>
+                    <Text style={styles.cardName}>{activeEntity.name} — Rank {activeEntity.rank}</Text>
+                    {ATTRS.map(a => <Text key={a} style={styles.attrLine}>{a}: {activeEntity.unlimited[a] ? '∞' : activeEntity.attrs[a]}</Text>)}
+                  </View>
+                ) : null}
                 {ATTRS.map(a => (
                   <Input
                     key={a}
@@ -607,6 +662,7 @@ const styles = StyleSheet.create({
   cardCaption: { color: theme.colors.textSecondary, fontSize: 12, fontStyle: 'italic' },
   fxLine: { color: theme.colors.neon, fontSize: 11, fontWeight: '700' },
   ctBlock: { backgroundColor: 'rgba(255,215,0,0.06)', padding: 8, borderRadius: 10, marginTop: 6, borderWidth: 1, borderColor: 'rgba(255,215,0,0.2)' },
+  entityBlock: { backgroundColor: 'rgba(34,197,94,0.08)', padding: 8, borderRadius: 10, marginTop: 6, borderWidth: 1, borderColor: 'rgba(34,197,94,0.25)' },
   attrLine: { color: '#fff', fontSize: 12 },
   obs: { color: theme.colors.textSecondary, fontStyle: 'italic', fontSize: 12, marginTop: 4 },
   time: { color: theme.colors.textMuted, fontSize: 10, marginTop: 4, textAlign: 'right' },

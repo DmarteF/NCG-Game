@@ -29,6 +29,8 @@ export default function CardEdit() {
   const [rank, setRank] = useState<CardRank>('E');
   const [effect, setEffect] = useState<CardEffect>('none');
   const [entityType, setEntityType] = useState<EntityType | undefined>();
+  const [entityAttrs, setEntityAttrs] = useState<Record<Attr, number>>({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
+  const [entityUnlimited, setEntityUnlimited] = useState<UnlimitedFlags>({});
   const [cost, setCost] = useState<AttrValues>({});
   const [boost, setBoost] = useState<AttrValues>({});
   const [unlimited, setUnlimited] = useState<UnlimitedFlags>({});
@@ -40,6 +42,8 @@ export default function CardEdit() {
       if (c) {
         setName(c.name); setCaption(c.caption); setImage(c.image);
         setRank(c.rank || 'E'); setEntityType(c.entityType);
+        setEntityAttrs({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0, ...(c.entityAttrs || {}) });
+        setEntityUnlimited(c.entityUnlimited || {});
         setEffect(c.effect); setCost(c.cost); setBoost(c.boost); setUnlimited(c.unlimited);
       }
     });
@@ -55,6 +59,8 @@ export default function CardEdit() {
       rank,
       effect,
       entityType,
+      entityAttrs: entityType ? entityAttrs : undefined,
+      entityUnlimited: entityType ? entityUnlimited : undefined,
       cost: cleanAttrs(cost),
       boost: cleanAttrs(boost),
       unlimited,
@@ -94,6 +100,25 @@ export default function CardEdit() {
           <Chip key={t} label={t} active={entityType === t} onPress={() => setEntityType(t)} testID={`entity-${t}`} />
         ))}
       </View>
+
+      {entityType ? (
+        <View>
+          <Text style={styles.label}>Atributos próprios da entidade</Text>
+          {ATTRS.map(a => (
+            <Input
+              key={a}
+              label={`${a}${entityUnlimited[a] ? ' (ilimitado)' : ''}`}
+              keyboardType="numeric"
+              editable={!entityUnlimited[a]}
+              value={entityUnlimited[a] ? '' : String(entityAttrs[a] ?? 0)}
+              onChangeText={(t) => setEntityAttrs({ ...entityAttrs, [a]: sanitizeNum(t) })}
+              placeholder={entityUnlimited[a] ? 'ilimitado' : '0'}
+              testID={`entity-attr-${a}`}
+            />
+          ))}
+          <UnlimitedEditor unlimited={entityUnlimited} setUnlimited={setEntityUnlimited} />
+        </View>
+      ) : null}
 
       <Text style={styles.label}>Efeito</Text>
       <View style={styles.chipsRow}>
