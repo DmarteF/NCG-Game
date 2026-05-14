@@ -17,41 +17,29 @@ export default function Home() {
 
   return (
     <Screen testID="home-screen">
-      <View style={styles.header}>
-        <Text style={styles.brand}>SHINOBI ARENA</Text>
-        <Text style={styles.subtitle}>Naruto Card Game</Text>
-        <View style={styles.bar} />
-      </View>
-
-      {profile ? (
-        <View style={styles.profileCard} testID="home-profile-card">
-          {profile.image ? (
+      <View style={styles.topRow}>
+        <Pressable onPress={() => router.push('/profile')} style={styles.profileCard} testID="home-profile-card">
+          {profile?.image ? (
             <Image source={{ uri: profile.image }} style={styles.avatar} />
           ) : (
             <View style={[styles.avatar, styles.avatarFallback]}>
               <Ionicons name="person" size={28} color={theme.colors.primary} />
             </View>
           )}
-          <View style={{ flex: 1 }}>
-            <Text style={styles.profileName} numberOfLines={1}>{profile.name || 'Sem nome'}</Text>
-            <Text style={styles.profileVillage}>{profile.village}</Text>
+          <View>
+            <Text style={styles.profileName} numberOfLines={1}>{profile?.name || 'Perfil'}</Text>
+            <Text style={styles.profileVillage} numberOfLines={1}>{profile?.village || 'Editar'}</Text>
           </View>
-          <Pressable
-            onPress={() => router.push('/profile')}
-            testID="edit-profile-icon-btn"
-            style={({ pressed }) => [styles.editBtn, { opacity: pressed ? 0.7 : 1 }]}
-          >
-            <Ionicons name="create-outline" size={20} color={theme.colors.primary} />
-          </Pressable>
-        </View>
-      ) : null}
+        </Pressable>
+      </View>
+
+      <View style={styles.header}>
+        <Text style={styles.brand}>SHINOBI ARENA</Text>
+        <Text style={styles.subtitle}>Naruto Card Game</Text>
+        <View style={styles.bar} />
+      </View>
 
       <View style={styles.menu}>
-        <Button
-          title={profile ? 'Editar Perfil' : 'Criar Perfil'}
-          onPress={() => router.push('/profile')}
-          testID="open-profile-btn"
-        />
         <Button
           title="Arena"
           onPress={() => router.push('/arena')}
@@ -72,6 +60,7 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
+  topRow: { alignItems: 'flex-start', marginTop: 4, marginBottom: 8 },
   header: { alignItems: 'center', marginTop: 24, marginBottom: 24 },
   brand: {
     color: theme.colors.textPrimary,
@@ -95,18 +84,17 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.primary,
   },
   profileCard: {
-    flexDirection: 'row', alignItems: 'center', gap: 14,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
     backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.xl,
-    padding: 14,
+    borderRadius: theme.radius.md,
+    padding: 8,
     borderWidth: 1, borderColor: theme.colors.border,
-    marginBottom: 20,
+    maxWidth: 190,
   },
-  avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: theme.colors.bg },
+  avatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: theme.colors.bg },
   avatarFallback: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: theme.colors.border },
-  profileName: { color: '#fff', fontSize: 17, fontWeight: '800' },
-  profileVillage: { color: theme.colors.neon, fontSize: 12, marginTop: 2, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
-  editBtn: { padding: 10, borderRadius: 10, backgroundColor: 'rgba(255,59,0,0.1)' },
+  profileName: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  profileVillage: { color: theme.colors.neon, fontSize: 10, marginTop: 2, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
   menu: { gap: 14, marginTop: 8 },
   footer: { color: theme.colors.textMuted, fontSize: 11, textAlign: 'center', marginTop: 28, letterSpacing: 2 },
 });

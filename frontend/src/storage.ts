@@ -6,6 +6,7 @@ const K = {
   cards: '@shinobi:cards',
   cts: '@shinobi:cts',
   history: '@shinobi:history',
+  lastPlayedCardIds: '@shinobi:lastPlayedCardIds',
 };
 
 async function getJSON<T>(key: string, fallback: T): Promise<T> {
@@ -43,6 +44,9 @@ export const Storage = {
     h.unshift(item);
     await setJSON(K.history, h.slice(0, 50));
   },
+
+  getLastPlayedCardIds: () => getJSON<string[]>(K.lastPlayedCardIds, []),
+  saveLastPlayedCardIds: (ids: string[]) => setJSON(K.lastPlayedCardIds, ids),
 };
 
 export function uid() {

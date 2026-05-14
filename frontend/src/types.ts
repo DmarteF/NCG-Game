@@ -18,6 +18,7 @@ export type Card = {
   caption: string;
   image?: string;
   rank: CardRank;
+  speed?: number;
   effect: CardEffect;
   entityType?: EntityType;
   entityAttrs?: Record<Attr, number>;

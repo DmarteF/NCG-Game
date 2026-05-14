@@ -10,6 +10,7 @@ import { Storage } from '../src/storage';
 import { Card, CT } from '../src/types';
 import { theme, ATTRS, CARD_RANKS, CT_RANKS, CardRank, Rank } from '../src/theme';
 import { Header } from './profile';
+import { ctDisplayName, formatNumberBR } from '../src/format';
 
 type Tab = 'cards' | 'ct';
 
@@ -41,7 +42,7 @@ export default function MenuCard() {
     ]);
   };
   const deleteCT = (c: CT) => {
-    Alert.alert('Apagar O C.T', `Apagar "${c.name}"?`, [
+    Alert.alert('Apagar O C.T', `Apagar "${ctDisplayName(c)}"?`, [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Apagar', style: 'destructive', onPress: async () => {
         const next = (await Storage.getCTs()).filter(x => x.id !== c.id);
@@ -66,8 +67,8 @@ export default function MenuCard() {
     return queryOk && rankOk && ctOk;
   });
   const visibleCTs = cts.filter((ct) => {
-    const summary = ATTRS.map(a => `${a}:${ct.unlimited[a] ? '∞' : (ct.attrs[a] ?? 0)}`).join(' ');
-    const haystack = `${ct.name} ${ct.rank} ${summary}`.toLowerCase();
+    const summary = ATTRS.map(a => `${a}:${formatNumberBR(ct.attrs[a] ?? 0)}`).join(' ');
+    const haystack = `${ctDisplayName(ct)} ${ct.rank} ${summary}`.toLowerCase();
     const queryOk = !normalizedQuery || haystack.includes(normalizedQuery);
     const rankOk = ctRanks.length === 0 || ctRanks.includes(ct.rank);
     return queryOk && rankOk;
@@ -99,7 +100,7 @@ export default function MenuCard() {
           <Text style={styles.filterTitle}>Compatível com O C.T</Text>
           <View style={styles.chipsRow}>
             <Chip label="Todos" active={ctFilter === 'all'} onPress={() => setCTFilter('all')} testID="filter-ct-all" />
-            {cts.map(ct => <Chip key={ct.id} label={`${ct.name || 'O C.T'} ${ct.rank}`} active={ctFilter === ct.id} onPress={() => setCTFilter(ct.id)} testID={`filter-ct-${ct.id}`} />)}
+            {cts.map(ct => <Chip key={ct.id} label={ctDisplayName(ct)} active={ctFilter === ct.id} onPress={() => setCTFilter(ct.id)} testID={`filter-ct-${ct.id}`} />)}
           </View>
         </View>
       ) : (
@@ -171,6 +172,7 @@ function CardItem({ card, onEdit, onDelete }: { card: Card; onEdit: () => void; 
       <View style={{ flex: 1, gap: 4 }}>
         <Text style={styles.itemTitle} numberOfLines={1}>{card.name || 'Sem nome'}</Text>
         <Text style={styles.itemSub} numberOfLines={2}>{card.caption || 'Sem legenda'}</Text>
+        <Text style={styles.itemEffects}>Speed: {card.speed ?? 0}</Text>
         {card.entityType ? <Text style={styles.itemEffects}>{card.entityType}</Text> : null}
         {effects ? <Text style={styles.itemEffects} numberOfLines={2}>{effects}</Text> : null}
       </View>
@@ -183,7 +185,7 @@ function CardItem({ card, onEdit, onDelete }: { card: Card; onEdit: () => void; 
 }
 
 function CTItem({ ct, onEdit, onDelete }: { ct: CT; onEdit: () => void; onDelete: () => void }) {
-  const summary = ATTRS.map(a => `${a}:${ct.unlimited[a] ? '∞' : (ct.attrs[a] ?? 0)}`).join(' • ');
+  const summary = ATTRS.map(a => `${a}:${formatNumberBR(ct.attrs[a] ?? 0)}`).join(' • ');
   return (
     <View style={styles.item} testID={`ct-item-${ct.id}`}>
       <View style={styles.thumbWrap}>
@@ -191,7 +193,7 @@ function CTItem({ ct, onEdit, onDelete }: { ct: CT; onEdit: () => void; onDelete
         <RankBadge rank={ct.rank} />
       </View>
       <View style={{ flex: 1, gap: 4 }}>
-        <Text style={styles.itemTitle} numberOfLines={1}>{ct.name || 'Sem nome'}</Text>
+        <Text style={styles.itemTitle} numberOfLines={1}>{ctDisplayName(ct)}</Text>
         <Text style={styles.itemSub} numberOfLines={2}>{summary}</Text>
       </View>
       <View style={styles.itemActions}>
@@ -224,8 +226,8 @@ function canCTUseCard(ct: CT | undefined, card: Card) {
 function describeCardEffects(card: Card): string {
   const parts: string[] = [];
   if (card.effect === 'none') return '';
-  const cost = ATTRS.filter(a => card.cost[a] != null).map(a => `${a}:${card.cost[a]}`).join(',');
-  const boost = ATTRS.filter(a => card.boost[a] != null).map(a => `${a}:${card.boost[a]}`).join(',');
+  const cost = ATTRS.filter(a => card.cost[a] != null).map(a => `${a}:${formatNumberBR(card.cost[a])}`).join(',');
+  const boost = ATTRS.filter(a => card.boost[a] != null).map(a => `${a}:${formatNumberBR(card.boost[a])}`).join(',');
   const unl = ATTRS.filter(a => card.unlimited[a]).map(a => `${a}:∞`).join(',');
   if (cost) parts.push(`Custo: ${cost}`);
   if (boost) parts.push(`Aumento: ${boost}`);

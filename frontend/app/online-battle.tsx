@@ -8,10 +8,11 @@ import Input from '../src/components/Input';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
 import { BattleEntity, Card, CT, PlayedCard } from '../src/types';
-import { ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CT_RANKS, CardRank, Rank } from '../src/theme';
+import { ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CardRank, Rank } from '../src/theme';
 import { AttrEditor, UnlimitedEditor, sanitizeNum } from './card-edit';
 import { RoomClient, WSEvent } from '../src/online';
-import * as FileSystem from 'expo-file-system/legacy';
+import { ctDisplayName, formatNumberBR } from '../src/format';
+import { withRemoteImageCard, withRemoteImageCT, withRemoteImageEntity } from '../src/remoteImages';
 
 type Side = 'me' | 'opp';
 type PlayerInfo = { name: string; village: string; image?: string };
@@ -337,7 +338,7 @@ export default function OnlineBattle() {
                   <Pressable key={c.id} onPress={() => setMyInitialCT(c)} testID={`online-pick-ct-${c.id}`}
                     style={({ pressed }) => [styles.ctCard, active && styles.ctCardActive, { opacity: pressed ? 0.85 : 1 }]}>
                     {c.image ? <Image source={{ uri: c.image }} style={styles.ctImg} /> : <View style={[styles.ctImg, styles.ctImgFallback]}><Ionicons name="shield" size={26} color={theme.colors.gold} /></View>}
-                    <Text style={styles.ctName} numberOfLines={1}>{c.name}</Text>
+                    <Text style={styles.ctName} numberOfLines={1}>{ctDisplayName(c)}</Text>
                     <Text style={styles.ctRank}>Rank {c.rank}</Text>
                   </Pressable>
                 );
@@ -384,8 +385,8 @@ export default function OnlineBattle() {
         </View>
         <View style={styles.actionBar}>
           <Button title="Jogar" onPress={() => currentTurn === 'me' ? setPickerVisible(true) : Alert.alert('Aguarde', 'Não é sua vez.')} disabled={currentTurn !== 'me'} testID="online-play-btn" style={{ flex: 1 }} small />
-          <Button title="Passar" variant="ghost" onPress={passTurn} disabled={currentTurn !== 'me'} testID="online-pass-btn" small />
           <Button title="Morte" variant="danger" onPress={declareDeath} testID="online-death-btn" small />
+          <Button title="Passar" variant="ghost" onPress={passTurn} disabled={currentTurn !== 'me'} testID="online-pass-btn" small />
           <Button title="Desistir" variant="danger" onPress={giveUp} testID="online-give-up-btn" small />
         </View>
         </>
@@ -400,7 +401,7 @@ export default function OnlineBattle() {
         visible={pickerVisible}
         onClose={() => setPickerVisible(false)}
         cards={cards}
-        cts={cts}
+        activeCT={myInitialCT}
         onImagePress={setZoomImage}
         onConfirm={(played, ctSnap, obs, finalAttrs, activeEntity) => { setPickerVisible(false); sendPlay(played, ctSnap, obs, finalAttrs, activeEntity); }}
       />
@@ -412,26 +413,6 @@ export default function OnlineBattle() {
 function fmt(s: number) {
   const m = Math.floor(Math.max(0, s) / 60); const r = Math.max(0, s) % 60;
   return `${m.toString().padStart(2, '0')}:${r.toString().padStart(2, '0')}`;
-}
-
-async function fileUriToDataUri(uri?: string) {
-  if (!uri || uri.startsWith('data:') || !uri.startsWith('file://')) return uri;
-  const ext = uri.split('.').pop()?.toLowerCase();
-  const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
-  const data = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-  return `data:${mime};base64,${data}`;
-}
-
-async function withRemoteImageCard(card: Card): Promise<Card> {
-  return { ...card, image: await fileUriToDataUri(card.image) };
-}
-
-async function withRemoteImageCT(ct: CT): Promise<CT> {
-  return { ...ct, image: await fileUriToDataUri(ct.image) };
-}
-
-async function withRemoteImageEntity(entity?: BattleEntity): Promise<BattleEntity | undefined> {
-  return entity ? { ...entity, image: await fileUriToDataUri(entity.image) } : undefined;
 }
 
 function SimpleHeader({ title, onBack }: { title: string; onBack: () => void }) {
@@ -484,11 +465,11 @@ function ChatBubble({ msg, meName, oppName, onImagePress }: { msg: ChatItem; meN
           <View style={styles.ctBlock}>
             <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
               <ZoomableThumb uri={msg.ctSnapshot.image} onPress={onImagePress} />
-              <Text style={styles.cardName}>O C.T {msg.ctSnapshot.name} — Rank {msg.ctSnapshot.rank}</Text>
+              <Text style={styles.cardName}>{ctDisplayName(msg.ctSnapshot)} — Rank {msg.ctSnapshot.rank}</Text>
             </View>
             {msg.finalAttrs && (
               <View style={{ marginTop: 6 }}>
-                {ATTRS.map((a) => (<Text key={a} style={styles.attrLine}>{a}: {String(msg.finalAttrs![a])}</Text>))}
+                {ATTRS.map((a) => (<Text key={a} style={styles.attrLine}>{a}: {formatNumberBR(msg.finalAttrs![a])}</Text>))}
               </View>
             )}
             {msg.ctObservation ? <Text style={styles.obs}>Obs: {msg.ctObservation}</Text> : null}
@@ -511,12 +492,13 @@ function ChatBubble({ msg, meName, oppName, onImagePress }: { msg: ChatItem; meN
 
 function renderEffectLines(c: Card) {
   const lines: string[] = [];
-  const cost = ATTRS.filter(a => c.cost[a] != null).map(a => `${a}: ${c.cost[a]}`).join(', ');
-  const boost = ATTRS.filter(a => c.boost[a] != null).map(a => `${a}: ${c.boost[a]}`).join(', ');
+  const cost = ATTRS.filter(a => c.cost[a] != null).map(a => `${a}: ${formatNumberBR(c.cost[a])}`).join(', ');
+  const boost = ATTRS.filter(a => c.boost[a] != null).map(a => `${a}: ${formatNumberBR(c.boost[a])}`).join(', ');
   const unl = ATTRS.filter(a => c.unlimited[a]).map(a => `${a}: ilimitado`).join(', ');
   if (cost) lines.push(`Custo: ${cost}`);
   if (boost) lines.push(`Aumento: ${boost}`);
   if (unl) lines.push(unl);
+  lines.push(`Speed: ${c.speed ?? 0}`);
   return lines.map((l, i) => <Text key={i} style={styles.fxLine}>{l}</Text>);
 }
 
@@ -537,6 +519,7 @@ function ImageZoomModal({ uri, onClose }: { uri: string | null; onClose: () => v
         <ScrollView style={{ flex: 1, alignSelf: 'stretch' }} contentContainerStyle={styles.zoomContent} maximumZoomScale={4} minimumZoomScale={1} centerContent>
           {uri ? <Image source={{ uri }} style={styles.zoomImage} resizeMode="contain" /> : null}
         </ScrollView>
+        <Pressable onPress={onClose} style={styles.zoomTapClose}><Text style={styles.zoomTapCloseText}>Fechar</Text></Pressable>
       </View>
     </Modal>
   );
@@ -560,7 +543,7 @@ function entityFromCard(card: Card): BattleEntity {
     image: card.image,
     rank: card.rank || 'E',
     attrs: { Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0, ...(card.entityAttrs || {}) },
-    unlimited: { ...(card.entityUnlimited || {}) },
+    unlimited: {},
     sourceCardId: card.id,
     entityType: card.entityType,
   };
@@ -569,7 +552,8 @@ function entityFromCard(card: Card): BattleEntity {
 function computeFinalAttrs(target: CT | BattleEntity, selectedCards: Card[]) {
   const finalAttrs: Record<Attr, number | 'ilimitado'> = {} as any;
   for (const a of ATTRS) {
-    if (target.unlimited[a]) { finalAttrs[a] = 'ilimitado'; continue; }
+    const targetUnlimited = 'sourceCardId' in target ? target.unlimited[a] : false;
+    if (targetUnlimited) { finalAttrs[a] = 'ilimitado'; continue; }
     let v = sanitizeNum(String(target.attrs[a] ?? 0));
     let unl = false;
     for (const c of selectedCards) {
@@ -583,26 +567,25 @@ function computeFinalAttrs(target: CT | BattleEntity, selectedCards: Card[]) {
 }
 
 // ======= Play Modal (same flow as Teste Local) =======
-function PlayModal({ visible, onClose, cards, cts, onImagePress, onConfirm }:
-  { visible: boolean; onClose: () => void; cards: Card[]; cts: CT[];
+function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm }:
+  { visible: boolean; onClose: () => void; cards: Card[]; activeCT: CT | null;
     onImagePress: (uri: string) => void;
     onConfirm: (p: PlayedCard[], ct: CT, obs: string, finalAttrs: Record<Attr, number | 'ilimitado'>, activeEntity?: BattleEntity) => void }) {
 
-  const [step, setStep] = useState<'cards' | 'card-edit' | 'ct-pick' | 'ct-edit'>('cards');
+  const [step, setStep] = useState<'cards' | 'card-edit' | 'target'>('cards');
   const [selectedCards, setSelectedCards] = useState<Card[]>([]);
   const [editIdx, setEditIdx] = useState(0);
-  const [selectedCT, setSelectedCT] = useState<CT | null>(null);
   const [activeEntityId, setActiveEntityId] = useState<string | null>(null);
   const [observation, setObservation] = useState('');
   const [cardQuery, setCardQuery] = useState('');
   const [cardRanks, setCardRanks] = useState<CardRank[]>([]);
-  const [ctQuery, setCTQuery] = useState('');
-  const [ctRanks, setCTRanks] = useState<Rank[]>([]);
+  const [lastCardIds, setLastCardIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (visible) {
-      setStep('cards'); setSelectedCards([]); setEditIdx(0); setSelectedCT(null); setActiveEntityId(null); setObservation('');
-      setCardQuery(''); setCardRanks([]); setCTQuery(''); setCTRanks([]);
+      setStep('cards'); setSelectedCards([]); setEditIdx(0); setActiveEntityId(null); setObservation('');
+      setCardQuery(''); setCardRanks([]);
+      Storage.getLastPlayedCardIds().then(setLastCardIds);
     }
   }, [visible]);
 
@@ -613,32 +596,33 @@ function PlayModal({ visible, onClose, cards, cts, onImagePress, onConfirm }:
   };
   const updateCard = (patch: Partial<Card>) => setSelectedCards(arr => arr.map((c, i) => i === editIdx ? { ...c, ...patch } : c));
 
-  const goEditCards = () => { if (selectedCards.length === 0) setStep('ct-pick'); else { setEditIdx(0); setStep('card-edit'); } };
-  const finishCardEdits = () => { if (editIdx + 1 < selectedCards.length) setEditIdx(editIdx + 1); else setStep('ct-pick'); };
+  const goEditCards = () => { if (selectedCards.length === 0) setStep('target'); else { setEditIdx(0); setStep('card-edit'); } };
+  const finishCardEdits = () => { if (editIdx + 1 < selectedCards.length) setEditIdx(editIdx + 1); else setStep('target'); };
   const toggleCardRank = (rank: CardRank) => setCardRanks((ranks) => ranks.includes(rank) ? ranks.filter(r => r !== rank) : [...ranks, rank]);
-  const toggleCTRank = (rank: Rank) => setCTRanks((ranks) => ranks.includes(rank) ? ranks.filter(r => r !== rank) : [...ranks, rank]);
-  const visibleCards = cards.filter((c) => {
+  const visibleCards = [...cards].sort((a, b) => {
+    const ai = lastCardIds.indexOf(a.id);
+    const bi = lastCardIds.indexOf(b.id);
+    if (ai === -1 && bi === -1) return 0;
+    if (ai === -1) return 1;
+    if (bi === -1) return -1;
+    return ai - bi;
+  }).filter((c) => {
     const q = cardQuery.trim().toLowerCase();
-    const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''}`.toLowerCase().includes(q);
+    const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''} ${c.speed ?? 0}`.toLowerCase().includes(q);
     const rankOk = cardRanks.length === 0 || cardRanks.includes(c.rank || 'E');
-    return queryOk && rankOk && canCTUseCard(selectedCT, c);
-  });
-  const visibleCTs = cts.filter((ct) => {
-    const q = ctQuery.trim().toLowerCase();
-    const queryOk = !q || `${ct.name} ${ct.rank} ${ATTRS.map(a => `${a}:${ct.unlimited[a] ? '∞' : (ct.attrs[a] ?? 0)}`).join(' ')}`.toLowerCase().includes(q);
-    const rankOk = ctRanks.length === 0 || ctRanks.includes(ct.rank);
-    return queryOk && rankOk;
+    return queryOk && rankOk && canCTUseCard(activeCT, c);
   });
   const entities = selectedCards.filter(c => c.entityType).map(entityFromCard);
   const activeEntity = entities.find(e => e.id === activeEntityId);
 
   const confirmPlay = () => {
-    if (!selectedCT) return Alert.alert('Atenção', 'Selecione O C.T para enviar.');
-    const target = activeEntity || selectedCT;
+    if (!activeCT) return Alert.alert('Atenção', 'O C.T inicial não está definido.');
+    const target = activeEntity || activeCT;
     const finalAttrs = computeFinalAttrs(target, selectedCards);
     const targetNote = activeEntity ? `Alvo ativo: ${activeEntity.entityType || 'entidade'} ${activeEntity.name}.` : 'Alvo ativo: O C.T principal.';
     const obs = [targetNote, observation.trim()].filter(Boolean).join(' ');
-    onConfirm(selectedCards.map(c => ({ cardSnapshot: c })), selectedCT, obs, finalAttrs, activeEntity);
+    Storage.saveLastPlayedCardIds(selectedCards.map(c => c.id));
+    onConfirm(selectedCards.map(c => ({ cardSnapshot: c })), activeCT, obs, finalAttrs, activeEntity);
   };
 
   return (
@@ -649,7 +633,7 @@ function PlayModal({ visible, onClose, cards, cts, onImagePress, onConfirm }:
             <Text style={styles.modalTitle}>
               {step === 'cards' ? '1. Selecione Cards' :
                step === 'card-edit' ? `2. Editar Card (${editIdx + 1}/${selectedCards.length})` :
-               step === 'ct-pick' ? '3. Selecione O C.T' : '4. Editar O C.T'}
+               '3. Alvo e Envio'}
             </Text>
             <Pressable onPress={onClose} testID="online-modal-close-btn"><Ionicons name="close" size={22} color="#fff" /></Pressable>
           </View>
@@ -670,7 +654,7 @@ function PlayModal({ visible, onClose, cards, cts, onImagePress, onConfirm }:
                         style={({ pressed }) => [styles.pickItem, active && styles.pickItemActive, { opacity: pressed ? 0.85 : 1 }]}>
                         <ZoomableThumb uri={c.image} onPress={onImagePress} />
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.pickName}>{c.name} — {c.rank || 'E'}</Text>
+                          <Text style={styles.pickName}>{c.name} — {c.rank || 'E'} • Speed: {c.speed ?? 0}</Text>
                           <Text style={styles.pickSub} numberOfLines={1}>{c.caption}</Text>
                         </View>
                         {active && <Ionicons name="checkmark-circle" size={20} color={theme.colors.primary} />}
@@ -685,33 +669,13 @@ function PlayModal({ visible, onClose, cards, cts, onImagePress, onConfirm }:
               <CardEditInline card={selectedCards[editIdx]} onChange={updateCard} />
             )}
 
-            {step === 'ct-pick' && (
-              <View style={{ gap: 10 }}>
-                <Input label="Buscar O C.T" value={ctQuery} onChangeText={setCTQuery} placeholder="Nome, rank ou atributo" testID="online-play-ct-search" />
-                <View style={styles.chipsRow}>
-                  {CT_RANKS.map(r => <Chip key={r} label={r} active={ctRanks.includes(r)} onPress={() => toggleCTRank(r)} testID={`online-play-ct-rank-${r}`} />)}
-                </View>
-                {visibleCTs.map((c) => {
-                  const active = selectedCT?.id === c.id;
-                  return (
-                    <Pressable key={c.id} onPress={() => setSelectedCT({ ...c, attrs: { ...c.attrs }, unlimited: { ...c.unlimited } })}
-                      testID={`online-play-ct-${c.id}`}
-                      style={({ pressed }) => [styles.pickItem, active && styles.pickItemActive, { opacity: pressed ? 0.85 : 1 }]}>
-                      <ZoomableThumb uri={c.image} onPress={onImagePress} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.pickName}>{c.name} — Rank {c.rank}</Text>
-                        <Text style={styles.pickSub}>{ATTRS.map(a => `${a}:${c.unlimited[a] ? '∞' : (c.attrs[a] ?? 0)}`).join(' • ')}</Text>
-                      </View>
-                      {active && <Ionicons name="checkmark-circle" size={20} color={theme.colors.primary} />}
-                    </Pressable>
-                  );
-                })}
-              </View>
-            )}
-
-            {step === 'ct-edit' && selectedCT && (
+            {step === 'target' && activeCT && (
               <View>
-                <Text style={styles.label}>Editar O C.T (apenas esta jogada)</Text>
+                <Text style={styles.label}>O C.T ativo desta luta</Text>
+                <View style={styles.ctBlock}>
+                  <Text style={styles.cardName}>{ctDisplayName(activeCT)} — Rank {activeCT.rank}</Text>
+                  {ATTRS.map(a => <Text key={a} style={styles.attrLine}>{a}: {formatNumberBR(activeCT.attrs[a] ?? 0)}</Text>)}
+                </View>
                 {entities.length > 0 ? (
                   <View>
                     <Text style={styles.label}>Alvo dos custos/aumentos</Text>
@@ -732,22 +696,9 @@ function PlayModal({ visible, onClose, cards, cts, onImagePress, onConfirm }:
                 {activeEntity ? (
                   <View style={styles.entityBlock}>
                     <Text style={styles.cardName}>{activeEntity.name} — Rank {activeEntity.rank}</Text>
-                    {ATTRS.map(a => <Text key={a} style={styles.attrLine}>{a}: {activeEntity.unlimited[a] ? '∞' : activeEntity.attrs[a]}</Text>)}
+                    {ATTRS.map(a => <Text key={a} style={styles.attrLine}>{a}: {formatNumberBR(activeEntity.attrs[a])}</Text>)}
                   </View>
                 ) : null}
-                {ATTRS.map(a => (
-                  <Input
-                    key={a}
-                    label={`${a}${selectedCT.unlimited[a] ? ' (ilimitado)' : ''}`}
-                    keyboardType="numeric"
-                    editable={!selectedCT.unlimited[a]}
-                    value={selectedCT.unlimited[a] ? '' : String(selectedCT.attrs[a] ?? 0)}
-                    onChangeText={(t) => setSelectedCT({ ...selectedCT, attrs: { ...selectedCT.attrs, [a]: sanitizeNum(t) } })}
-                    placeholder={selectedCT.unlimited[a] ? 'ilimitado' : '0'}
-                    testID={`online-play-ct-attr-${a}`}
-                  />
-                ))}
-                <UnlimitedEditor unlimited={selectedCT.unlimited} setUnlimited={(u) => setSelectedCT({ ...selectedCT, unlimited: u })} />
                 <Input
                   label="Observação"
                   value={observation}
@@ -763,9 +714,8 @@ function PlayModal({ visible, onClose, cards, cts, onImagePress, onConfirm }:
 
           <View style={styles.modalFooter}>
             {step === 'cards' && <Button title="Avançar" onPress={goEditCards} testID="online-play-next-cards" />}
-            {step === 'card-edit' && <Button title={editIdx + 1 < selectedCards.length ? 'Próximo card' : 'Selecionar O C.T'} onPress={finishCardEdits} testID="online-play-next-card-edit" />}
-            {step === 'ct-pick' && <Button title="Editar O C.T" onPress={() => selectedCT ? setStep('ct-edit') : Alert.alert('Atenção', 'Selecione O C.T')} testID="online-play-next-ct" />}
-            {step === 'ct-edit' && <Button title="Enviar Jogada" onPress={confirmPlay} testID="online-play-confirm-btn" />}
+            {step === 'card-edit' && <Button title={editIdx + 1 < selectedCards.length ? 'Próximo card' : 'Escolher alvo'} onPress={finishCardEdits} testID="online-play-next-card-edit" />}
+            {step === 'target' && <Button title="Enviar Jogada" onPress={confirmPlay} testID="online-play-confirm-btn" />}
           </View>
         </View>
       </View>
@@ -778,7 +728,7 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
     <View>
       <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 10 }}>
         {card.image ? <Image source={{ uri: card.image }} style={[styles.cardThumb, { width: 50, height: 50 }]} /> : null}
-        <Text style={styles.pickName}>{card.name} — {card.rank || 'E'}</Text>
+        <Text style={styles.pickName}>{card.name} — {card.rank || 'E'} • Speed: {card.speed ?? 0}</Text>
       </View>
       <Input label="Legenda (desta jogada)" value={card.caption} onChangeText={(t) => onChange({ caption: t })} multiline numberOfLines={3} style={{ minHeight: 70, textAlignVertical: 'top' }} testID="online-play-card-caption" />
       <Text style={styles.label}>Custo</Text>
@@ -866,6 +816,8 @@ const styles = StyleSheet.create({
   inlineRankSpecial: { backgroundColor: theme.colors.gold },
   zoomWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', alignItems: 'center', justifyContent: 'center' },
   zoomClose: { position: 'absolute', top: 42, right: 20, zIndex: 2, width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
+  zoomTapClose: { position: 'absolute', left: 24, right: 24, bottom: 28, zIndex: 2, paddingVertical: 12, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center' },
+  zoomTapCloseText: { color: '#fff', fontWeight: '900', fontSize: 12, textTransform: 'uppercase' },
   zoomContent: { minHeight: '100%', alignItems: 'center', justifyContent: 'center' },
   zoomImage: { width: 360, height: 560, maxWidth: '100%' },
 });

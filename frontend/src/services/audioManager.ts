@@ -1,17 +1,5 @@
 import { Audio } from 'expo-av';
-
-const musics = [
-  require('../audio/1.mp3'),
-  require('../audio/2.mp3'),
-  require('../audio/3.mp3'),
-  require('../audio/4.mp3'),
-  require('../audio/5.mp3'),
-  require('../audio/6.mp3'),
-  require('../audio/7.mp3'),
-  require('../audio/8.mp3'),
-  require('../audio/9.mp3'),
-  require('../audio/10.mp3'),
-];
+import { musicTracks } from '../musicTracks';
 
 class AudioManager {
   private sound: Audio.Sound | null = null;
@@ -24,7 +12,9 @@ class AudioManager {
 
       this.started = true;
 
-      const randomMusic = musics[Math.floor(Math.random() * musics.length)];
+      if (musicTracks.length === 0) return;
+
+      const randomMusic = musicTracks[Math.floor(Math.random() * musicTracks.length)];
 
       const { sound } = await Audio.Sound.createAsync(randomMusic, {
         shouldPlay: true,

@@ -10,6 +10,7 @@ import { Storage, uid } from '../src/storage';
 import { Card, CardEffect, AttrValues, UnlimitedFlags, EntityType } from '../src/types';
 import { ATTRS, Attr, theme, CARD_RANKS, CardRank } from '../src/theme';
 import { Header } from './profile';
+import { formatNumberBR } from '../src/format';
 
 const EFFECTS: { id: CardEffect; label: string }[] = [
   { id: 'none', label: 'Sem efeito' },
@@ -27,10 +28,10 @@ export default function CardEdit() {
   const [caption, setCaption] = useState('');
   const [image, setImage] = useState<string | undefined>();
   const [rank, setRank] = useState<CardRank>('E');
+  const [speed, setSpeed] = useState(0);
   const [effect, setEffect] = useState<CardEffect>('none');
   const [entityType, setEntityType] = useState<EntityType | undefined>();
   const [entityAttrs, setEntityAttrs] = useState<Record<Attr, number>>({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
-  const [entityUnlimited, setEntityUnlimited] = useState<UnlimitedFlags>({});
   const [cost, setCost] = useState<AttrValues>({});
   const [boost, setBoost] = useState<AttrValues>({});
   const [unlimited, setUnlimited] = useState<UnlimitedFlags>({});
@@ -41,9 +42,8 @@ export default function CardEdit() {
       const c = cards.find(x => x.id === id);
       if (c) {
         setName(c.name); setCaption(c.caption); setImage(c.image);
-        setRank(c.rank || 'E'); setEntityType(c.entityType);
+        setRank(c.rank || 'E'); setSpeed(clampSpeed(c.speed)); setEntityType(c.entityType);
         setEntityAttrs({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0, ...(c.entityAttrs || {}) });
-        setEntityUnlimited(c.entityUnlimited || {});
         setEffect(c.effect); setCost(c.cost); setBoost(c.boost); setUnlimited(c.unlimited);
       }
     });
@@ -57,10 +57,11 @@ export default function CardEdit() {
       caption: caption.trim(),
       image,
       rank,
+      speed: clampSpeed(speed),
       effect,
       entityType,
       entityAttrs: entityType ? entityAttrs : undefined,
-      entityUnlimited: entityType ? entityUnlimited : undefined,
+      entityUnlimited: undefined,
       cost: cleanAttrs(cost),
       boost: cleanAttrs(boost),
       unlimited,
@@ -93,6 +94,15 @@ export default function CardEdit() {
         ))}
       </View>
 
+      <Input
+        label="Speed (0 a 8)"
+        value={String(speed)}
+        onChangeText={(t) => setSpeed(clampSpeed(sanitizeNum(t)))}
+        keyboardType="numeric"
+        placeholder="0"
+        testID="card-speed-input"
+      />
+
       <Text style={styles.label}>Entidade invocada</Text>
       <View style={styles.chipsRow}>
         <Chip label="Nenhuma" active={!entityType} onPress={() => setEntityType(undefined)} testID="entity-none" />
@@ -107,16 +117,14 @@ export default function CardEdit() {
           {ATTRS.map(a => (
             <Input
               key={a}
-              label={`${a}${entityUnlimited[a] ? ' (ilimitado)' : ''}`}
+              label={`${a} (${formatNumberBR(entityAttrs[a] ?? 0)})`}
               keyboardType="numeric"
-              editable={!entityUnlimited[a]}
-              value={entityUnlimited[a] ? '' : String(entityAttrs[a] ?? 0)}
+              value={String(entityAttrs[a] ?? 0)}
               onChangeText={(t) => setEntityAttrs({ ...entityAttrs, [a]: sanitizeNum(t) })}
-              placeholder={entityUnlimited[a] ? 'ilimitado' : '0'}
+              placeholder="0"
               testID={`entity-attr-${a}`}
             />
           ))}
-          <UnlimitedEditor unlimited={entityUnlimited} setUnlimited={setEntityUnlimited} />
         </View>
       ) : null}
 
@@ -157,7 +165,7 @@ export function AttrEditor({ label, values, setValues, keyPrefix }: { label: str
       {ATTRS.filter(a => a in values).map(a => (
         <Input
           key={a}
-          label={`${label} ${a}`}
+          label={`${label} ${a} (${formatNumberBR(values[a] ?? 0)})`}
           keyboardType="numeric"
           value={String(values[a] ?? '')}
           onChangeText={(t) => setValues({ ...values, [a]: sanitizeNum(t) })}
@@ -186,6 +194,11 @@ export function sanitizeNum(t: string): number {
   const n = parseInt(t.replace(/[^0-9-]/g, ''), 10);
   if (!isFinite(n) || isNaN(n)) return 0;
   return n;
+}
+
+export function clampSpeed(value: number | undefined): number {
+  const n = Number.isFinite(value) ? Number(value) : 0;
+  return Math.max(0, Math.min(8, Math.trunc(n)));
 }
 
 function cleanAttrs(v: AttrValues): AttrValues {

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Alert } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Screen from '../src/components/Screen';
 import Button from '../src/components/Button';
@@ -7,10 +7,13 @@ import Input from '../src/components/Input';
 import ImagePickerField from '../src/components/ImagePickerField';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
-import { CT, UnlimitedFlags } from '../src/types';
+import { CT } from '../src/types';
 import { ATTRS, Attr, theme, CT_RANKS, Rank } from '../src/theme';
 import { Header } from './profile';
-import { sanitizeNum, UnlimitedEditor } from './card-edit';
+import { sanitizeNum } from './card-edit';
+import { formatNumberBR } from '../src/format';
+
+const emptyAttrs = (): Record<Attr, number> => ({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
 
 export default function CTEdit() {
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -18,8 +21,7 @@ export default function CTEdit() {
   const [name, setName] = useState('');
   const [rank, setRank] = useState<Rank>('E');
   const [image, setImage] = useState<string | undefined>();
-  const [attrs, setAttrs] = useState<Record<Attr, number>>({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
-  const [unlimited, setUnlimited] = useState<UnlimitedFlags>({});
+  const [attrs, setAttrs] = useState<Record<Attr, number>>(emptyAttrs());
 
   useEffect(() => {
     if (!id) return;
@@ -27,14 +29,13 @@ export default function CTEdit() {
       const c = cts.find(x => x.id === id);
       if (c) {
         setName(c.name); setRank(String(c.rank) === 'S-R' ? 'E' : c.rank); setImage(c.image);
-        setAttrs(c.attrs); setUnlimited(c.unlimited);
+        setAttrs({ ...emptyAttrs(), ...(c.attrs || {}) });
       }
     });
   }, [id]);
 
   const save = async () => {
-    if (!name.trim()) return Alert.alert('Atenção', 'Informe o nome do O C.T.');
-    const ct: CT = { id: id || uid(), name: name.trim(), rank: String(rank) === 'S-R' ? 'E' : rank, image, attrs, unlimited };
+    const ct: CT = { id: id || uid(), name: name.trim(), rank: String(rank) === 'S-R' ? 'E' : rank, image, attrs, unlimited: {} };
     const list = await Storage.getCTs();
     const next = id ? list.map(x => x.id === id ? ct : x) : [...list, ct];
     await Storage.saveCTs(next);
@@ -49,7 +50,7 @@ export default function CTEdit() {
         <ImagePickerField value={image} onChange={setImage} label="Imagem do O C.T" size={140} testID="ct-image-picker" />
       </View>
 
-      <Input label="Nome do O C.T" value={name} onChangeText={setName} placeholder="Ex: Kage Mode" testID="ct-name-input" />
+      <Input label="Nome do O C.T (opcional)" value={name} onChangeText={setName} placeholder={`O C.T Rank ${rank}`} testID="ct-name-input" />
 
       <Text style={styles.label}>Rank</Text>
       <View style={styles.row}>
@@ -62,18 +63,15 @@ export default function CTEdit() {
       {ATTRS.map(a => (
         <View key={a} style={{ marginBottom: 4 }}>
           <Input
-            label={`${a}${unlimited[a] ? ' (ilimitado)' : ''}`}
+            label={`${a} (${formatNumberBR(attrs[a] ?? 0)})`}
             keyboardType="numeric"
-            editable={!unlimited[a]}
-            value={unlimited[a] ? '' : String(attrs[a] ?? 0)}
+            value={String(attrs[a] ?? 0)}
             onChangeText={(t) => setAttrs({ ...attrs, [a]: sanitizeNum(t) })}
-            placeholder={unlimited[a] ? 'ilimitado' : '0'}
+            placeholder="0"
             testID={`ct-attr-${a}-input`}
           />
         </View>
       ))}
-
-      <UnlimitedEditor unlimited={unlimited} setUnlimited={setUnlimited} />
 
       <View style={styles.actions}>
         <Button title="Cancelar" variant="ghost" onPress={() => router.back()} testID="ct-cancel-btn" />
