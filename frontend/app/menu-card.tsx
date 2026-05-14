@@ -8,7 +8,7 @@ import Input from '../src/components/Input';
 import Chip from '../src/components/Chip';
 import { Storage } from '../src/storage';
 import { Card, CT } from '../src/types';
-import { theme, ATTRS, CARD_RANKS, CT_RANKS, CardRank, Rank } from '../src/theme';
+import { theme, ATTRS, CT_ATTRS, CARD_RANKS, CT_RANKS, CardRank, Rank } from '../src/theme';
 import { Header } from './profile';
 import { ctDisplayName, formatNumberBR } from '../src/format';
 
@@ -67,7 +67,7 @@ export default function MenuCard() {
     return queryOk && rankOk && ctOk;
   });
   const visibleCTs = cts.filter((ct) => {
-    const summary = ATTRS.map(a => `${a}:${formatNumberBR(ct.attrs[a] ?? 0)}`).join(' ');
+    const summary = CT_ATTRS.map(a => `${a}:${formatNumberBR(ct.attrs[a] ?? 0)}`).join(' ');
     const haystack = `${ctDisplayName(ct)} ${ct.rank} ${summary}`.toLowerCase();
     const queryOk = !normalizedQuery || haystack.includes(normalizedQuery);
     const rankOk = ctRanks.length === 0 || ctRanks.includes(ct.rank);
@@ -185,7 +185,7 @@ function CardItem({ card, onEdit, onDelete }: { card: Card; onEdit: () => void; 
 }
 
 function CTItem({ ct, onEdit, onDelete }: { ct: CT; onEdit: () => void; onDelete: () => void }) {
-  const summary = ATTRS.map(a => `${a}:${formatNumberBR(ct.attrs[a] ?? 0)}`).join(' • ');
+  const summary = CT_ATTRS.map(a => `${a}:${formatNumberBR(ct.attrs[a] ?? 0)}`).join(' • ');
   return (
     <View style={styles.item} testID={`ct-item-${ct.id}`}>
       <View style={styles.thumbWrap}>

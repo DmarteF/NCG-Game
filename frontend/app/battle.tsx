@@ -8,7 +8,7 @@ import Input from '../src/components/Input';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
 import { BattleEntity, Card, CT, ChatMsg, MatchType, PlayedCard } from '../src/types';
-import { ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CardRank, Rank } from '../src/theme';
+import { ATTRS, CT_ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CardRank, Rank } from '../src/theme';
 import { AttrEditor, UnlimitedEditor, sanitizeNum } from './card-edit';
 import { ctDisplayName, formatNumberBR } from '../src/format';
 
@@ -292,7 +292,7 @@ function ChatBubble({ msg, t2Label, onImagePress }: { msg: ChatMsg; t2Label: str
             </View>
             {msg.finalAttrs && (
               <View style={{ marginTop: 6 }}>
-                {ATTRS.map((a) => (
+                {displayFinalAttrs(msg.finalAttrs!).map((a) => (
                   <Text key={a} style={styles.attrLine}>{a}: {formatNumberBR(msg.finalAttrs![a])}</Text>
                 ))}
               </View>
@@ -326,6 +326,11 @@ function renderEffectLines(c: Card) {
   if (unl) lines.push(unl);
   lines.push(`Speed: ${c.speed ?? 0}`);
   return lines.map((l, i) => <Text key={i} style={styles.fxLine}>{l}</Text>);
+}
+
+function displayFinalAttrs(finalAttrs: Record<Attr, number | 'ilimitado'>) {
+  const hasDurEffect = finalAttrs.Dur === 'ilimitado' || Number(finalAttrs.Dur || 0) !== 0;
+  return hasDurEffect ? ATTRS : CT_ATTRS;
 }
 
 function ZoomableThumb({ uri, onPress }: { uri?: string; onPress: (uri: string) => void }) {
@@ -386,7 +391,7 @@ function computeFinalAttrs(target: CT | BattleEntity, selectedCards: Card[]) {
   for (const a of ATTRS) {
     const targetUnlimited = 'sourceCardId' in target ? target.unlimited[a] : false;
     if (targetUnlimited) { finalAttrs[a] = 'ilimitado'; continue; }
-    let v = sanitizeNum(String(target.attrs[a] ?? 0));
+    let v = 'sourceCardId' in target || a !== 'Dur' ? sanitizeNum(String(target.attrs[a] ?? 0)) : 0;
     let unl = false;
     for (const c of selectedCards) {
       if (c.unlimited[a]) { unl = true; break; }
@@ -521,7 +526,7 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
                 <Text style={styles.label}>O C.T ativo desta luta</Text>
                 <View style={styles.ctBlock}>
                   <Text style={styles.cardName}>{ctDisplayName(activeCT)} — Rank {activeCT.rank}</Text>
-                  {ATTRS.map(a => <Text key={a} style={styles.attrLine}>{a}: {formatNumberBR(activeCT.attrs[a] ?? 0)}</Text>)}
+                  {CT_ATTRS.map(a => <Text key={a} style={styles.attrLine}>{a}: {formatNumberBR(activeCT.attrs[a] ?? 0)}</Text>)}
                 </View>
                 {entities.length > 0 ? (
                   <View>

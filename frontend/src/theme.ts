@@ -23,6 +23,7 @@ export const theme = {
 
 export const ATTRS = ['Atk', 'Def', 'Dur', 'Ag', 'Ck', 'Hp'] as const;
 export type Attr = typeof ATTRS[number];
+export const CT_ATTRS = ['Atk', 'Def', 'Ag', 'Ck', 'Hp'] as const;
 export const CARD_RANKS = ['S-R', 'E', 'D', 'C', 'B', 'A', 'S'] as const;
 export const CT_RANKS = ['E', 'D', 'C', 'B', 'A', 'S'] as const;
 export const RANKS = CT_RANKS;

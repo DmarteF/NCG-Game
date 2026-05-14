@@ -8,12 +8,18 @@ import ImagePickerField from '../src/components/ImagePickerField';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
 import { CT } from '../src/types';
-import { ATTRS, Attr, theme, CT_RANKS, Rank } from '../src/theme';
+import { Attr, CT_ATTRS, theme, CT_RANKS, Rank } from '../src/theme';
 import { Header } from './profile';
 import { sanitizeNum } from './card-edit';
 import { formatNumberBR } from '../src/format';
 
 const emptyAttrs = (): Record<Attr, number> => ({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
+const ctBaseAttrs = (attrs: Partial<Record<Attr, number>> = {}) => {
+  const next = emptyAttrs();
+  CT_ATTRS.forEach((a) => { next[a] = attrs[a] ?? 0; });
+  next.Dur = 0;
+  return next;
+};
 
 export default function CTEdit() {
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -29,13 +35,13 @@ export default function CTEdit() {
       const c = cts.find(x => x.id === id);
       if (c) {
         setName(c.name); setRank(String(c.rank) === 'S-R' ? 'E' : c.rank); setImage(c.image);
-        setAttrs({ ...emptyAttrs(), ...(c.attrs || {}) });
+        setAttrs(ctBaseAttrs(c.attrs));
       }
     });
   }, [id]);
 
   const save = async () => {
-    const ct: CT = { id: id || uid(), name: name.trim(), rank: String(rank) === 'S-R' ? 'E' : rank, image, attrs, unlimited: {} };
+    const ct: CT = { id: id || uid(), name: name.trim(), rank: String(rank) === 'S-R' ? 'E' : rank, image, attrs: ctBaseAttrs(attrs), unlimited: {} };
     const list = await Storage.getCTs();
     const next = id ? list.map(x => x.id === id ? ct : x) : [...list, ct];
     await Storage.saveCTs(next);
@@ -60,7 +66,7 @@ export default function CTEdit() {
       </View>
 
       <Text style={[styles.label, { marginTop: 12 }]}>Atributos</Text>
-      {ATTRS.map(a => (
+      {CT_ATTRS.map(a => (
         <View key={a} style={{ marginBottom: 4 }}>
           <Input
             label={`${a} (${formatNumberBR(attrs[a] ?? 0)})`}
