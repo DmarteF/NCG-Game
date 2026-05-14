@@ -6,7 +6,7 @@ import pytest
 import requests
 import websockets
 
-BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://ninja-local-fight.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("EXPO_PUBLIC_BACKEND_URL", "https://shinobi-arena-api.onrender.com").rstrip("/")
 WS_BASE = BASE_URL.replace("http", "ws", 1)
 
 

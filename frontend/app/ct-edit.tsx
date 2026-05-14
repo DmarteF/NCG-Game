@@ -8,7 +8,7 @@ import ImagePickerField from '../src/components/ImagePickerField';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
 import { CT, UnlimitedFlags } from '../src/types';
-import { ATTRS, Attr, theme, RANKS, Rank } from '../src/theme';
+import { ATTRS, Attr, theme, CT_RANKS, Rank } from '../src/theme';
 import { Header } from './profile';
 import { sanitizeNum, UnlimitedEditor } from './card-edit';
 
@@ -18,7 +18,7 @@ export default function CTEdit() {
   const [name, setName] = useState('');
   const [rank, setRank] = useState<Rank>('E');
   const [image, setImage] = useState<string | undefined>();
-  const [attrs, setAttrs] = useState<Record<Attr, number>>({ Atk: 0, Def: 0, Ag: 0, Ck: 0, Hp: 0 });
+  const [attrs, setAttrs] = useState<Record<Attr, number>>({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
   const [unlimited, setUnlimited] = useState<UnlimitedFlags>({});
 
   useEffect(() => {
@@ -26,7 +26,7 @@ export default function CTEdit() {
     Storage.getCTs().then((cts) => {
       const c = cts.find(x => x.id === id);
       if (c) {
-        setName(c.name); setRank(c.rank); setImage(c.image);
+        setName(c.name); setRank(String(c.rank) === 'S-R' ? 'E' : c.rank); setImage(c.image);
         setAttrs(c.attrs); setUnlimited(c.unlimited);
       }
     });
@@ -34,7 +34,7 @@ export default function CTEdit() {
 
   const save = async () => {
     if (!name.trim()) return Alert.alert('Atenção', 'Informe o nome do O C.T.');
-    const ct: CT = { id: id || uid(), name: name.trim(), rank, image, attrs, unlimited };
+    const ct: CT = { id: id || uid(), name: name.trim(), rank: String(rank) === 'S-R' ? 'E' : rank, image, attrs, unlimited };
     const list = await Storage.getCTs();
     const next = id ? list.map(x => x.id === id ? ct : x) : [...list, ct];
     await Storage.saveCTs(next);
@@ -53,7 +53,7 @@ export default function CTEdit() {
 
       <Text style={styles.label}>Rank</Text>
       <View style={styles.row}>
-        {RANKS.map(r => (
+        {CT_RANKS.map(r => (
           <Chip key={r} label={r} active={r === rank} onPress={() => setRank(r)} testID={`rank-${r}`} />
         ))}
       </View>

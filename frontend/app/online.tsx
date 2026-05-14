@@ -135,4 +135,5 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   back: { color: theme.colors.textSecondary, fontSize: 13, textAlign: 'center', marginTop: 4 },
   hint: { color: theme.colors.textMuted, fontSize: 12, textAlign: 'center', marginTop: 8 },
+  errorText: { color: theme.colors.danger, fontSize: 12, fontWeight: '700', marginBottom: 10 },
 });

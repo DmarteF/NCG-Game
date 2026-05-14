@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Image, FlatList, Alert, Modal, ScrollView } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,8 +7,8 @@ import Button from '../src/components/Button';
 import Input from '../src/components/Input';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
-import { Card, CT, ChatMsg, MatchType, AttrValues, UnlimitedFlags, PlayedCard } from '../src/types';
-import { ATTRS, Attr, theme, RANK_ORDER, Rank } from '../src/theme';
+import { Card, CT, ChatMsg, MatchType, PlayedCard } from '../src/types';
+import { ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CT_RANKS, CardRank, Rank } from '../src/theme';
 import { AttrEditor, UnlimitedEditor, sanitizeNum } from './card-edit';
 
 type Team = 'team1' | 'team2';
@@ -32,6 +32,7 @@ export default function Battle() {
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [timeLeft, setTimeLeft] = useState(turnSeconds);
   const [pickerVisible, setPickerVisible] = useState(false);
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
   const [result, setResult] = useState<string>('');
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -56,6 +57,7 @@ export default function Battle() {
       });
     }, 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, currentTeam, isBoss, turnSeconds]);
 
   const t2Label = isBoss ? 'Boss' : 'Time 2';
@@ -193,7 +195,7 @@ export default function Battle() {
         data={messages}
         keyExtractor={(i) => i.id}
         contentContainerStyle={{ paddingVertical: 12, gap: 8 }}
-        renderItem={({ item }) => <ChatBubble msg={item} t2Label={t2Label} />}
+        renderItem={({ item }) => <ChatBubble msg={item} t2Label={t2Label} onImagePress={setZoomImage} />}
         ListEmptyComponent={<Text style={styles.empty}>Nenhuma jogada ainda. Faça sua jogada.</Text>}
       />
 
@@ -220,11 +222,13 @@ export default function Battle() {
         onClose={() => setPickerVisible(false)}
         cards={cards}
         cts={cts}
+        onImagePress={setZoomImage}
         onConfirm={(played, ctSnap, obs, finalAttrs) => {
           setPickerVisible(false);
           onSendPlay(played, ctSnap, obs, finalAttrs);
         }}
       />
+      <ImageZoomModal uri={zoomImage} onClose={() => setZoomImage(null)} />
     </Screen>
   );
 }
@@ -259,7 +263,7 @@ function CTSelector({ label, cts, value, onChange, testID }: { label: string; ct
   );
 }
 
-function ChatBubble({ msg, t2Label }: { msg: ChatMsg; t2Label: string }) {
+function ChatBubble({ msg, t2Label, onImagePress }: { msg: ChatMsg; t2Label: string; onImagePress: (uri: string) => void }) {
   if (msg.team === 'system') {
     return (
       <View style={styles.systemRow}>
@@ -276,10 +280,13 @@ function ChatBubble({ msg, t2Label }: { msg: ChatMsg; t2Label: string }) {
         {msg.playedCards?.map((p, idx) => (
           <View key={idx} style={styles.playedCard}>
             <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-              {p.cardSnapshot.image ? <Image source={{ uri: p.cardSnapshot.image }} style={styles.cardThumb} /> : <View style={[styles.cardThumb, styles.cardThumbFb]} />}
-              <Text style={styles.cardName}>{p.cardSnapshot.name}</Text>
+              <ZoomableThumb uri={p.cardSnapshot.image} onPress={onImagePress} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardName}>{p.cardSnapshot.name}</Text>
+                <RankBadge rank={p.cardSnapshot.rank || 'E'} />
+              </View>
             </View>
-            {p.cardSnapshot.caption ? <Text style={styles.cardCaption}>"{p.cardSnapshot.caption}"</Text> : null}
+            {p.cardSnapshot.caption ? <Text style={styles.cardCaption}>{p.cardSnapshot.caption}</Text> : null}
             {renderEffectLines(p.cardSnapshot)}
           </View>
         ))}
@@ -287,7 +294,7 @@ function ChatBubble({ msg, t2Label }: { msg: ChatMsg; t2Label: string }) {
         {msg.ctSnapshot && (
           <View style={styles.ctBlock}>
             <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-              {msg.ctSnapshot.image ? <Image source={{ uri: msg.ctSnapshot.image }} style={styles.cardThumb} /> : <View style={[styles.cardThumb, styles.cardThumbFb]} />}
+              <ZoomableThumb uri={msg.ctSnapshot.image} onPress={onImagePress} />
               <Text style={styles.cardName}>O C.T {msg.ctSnapshot.name} — Rank {msg.ctSnapshot.rank}</Text>
             </View>
             {msg.finalAttrs && (
@@ -297,7 +304,7 @@ function ChatBubble({ msg, t2Label }: { msg: ChatMsg; t2Label: string }) {
                 ))}
               </View>
             )}
-            {msg.ctObservation ? <Text style={styles.obs}>Obs: "{msg.ctObservation}"</Text> : null}
+            {msg.ctObservation ? <Text style={styles.obs}>Obs: {msg.ctObservation}</Text> : null}
           </View>
         )}
 
@@ -318,9 +325,49 @@ function renderEffectLines(c: Card) {
   return lines.map((l, i) => <Text key={i} style={styles.fxLine}>{l}</Text>);
 }
 
+function ZoomableThumb({ uri, onPress }: { uri?: string; onPress: (uri: string) => void }) {
+  if (!uri) return <View style={[styles.cardThumb, styles.cardThumbFb]} />;
+  return (
+    <Pressable onPress={() => onPress(uri)} hitSlop={8}>
+      <Image source={{ uri }} style={styles.cardThumb} />
+    </Pressable>
+  );
+}
+
+function ImageZoomModal({ uri, onClose }: { uri: string | null; onClose: () => void }) {
+  return (
+    <Modal visible={!!uri} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.zoomWrap}>
+        <Pressable onPress={onClose} style={styles.zoomClose}><Ionicons name="close" size={24} color="#fff" /></Pressable>
+        <ScrollView
+          style={{ flex: 1, alignSelf: 'stretch' }}
+          contentContainerStyle={styles.zoomContent}
+          maximumZoomScale={4}
+          minimumZoomScale={1}
+          centerContent
+        >
+          {uri ? <Image source={{ uri }} style={styles.zoomImage} resizeMode="contain" /> : null}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+function RankBadge({ rank }: { rank: CardRank | Rank }) {
+  return <Text style={[styles.inlineRank, rank === 'S-R' && styles.inlineRankSpecial]}>{rank}</Text>;
+}
+
+function canCTUseCard(ct: CT | null, card: Card) {
+  if (!ct) return true;
+  if (ct.rank === 'B') return ['S-R', 'E', 'D', 'C', 'B'].includes(card.rank || 'E');
+  const order: Record<CardRank, number> = { 'S-R': 0, E: 1, D: 2, C: 3, B: 4, A: 5, S: 6 };
+  return order[card.rank || 'E'] <= order[ct.rank];
+}
+
 // ====== Play Modal ======
-function PlayModal({ visible, onClose, cards, cts, onConfirm }:
+function PlayModal({ visible, onClose, cards, cts, onImagePress, onConfirm }:
   { visible: boolean; onClose: () => void; cards: Card[]; cts: CT[];
+    onImagePress: (uri: string) => void;
     onConfirm: (p: PlayedCard[], ct: CT, obs: string, finalAttrs: Record<Attr, number | 'ilimitado'>) => void }) {
 
   const [step, setStep] = useState<'cards' | 'card-edit' | 'ct-pick' | 'ct-edit'>('cards');
@@ -328,10 +375,15 @@ function PlayModal({ visible, onClose, cards, cts, onConfirm }:
   const [editIdx, setEditIdx] = useState(0);
   const [selectedCT, setSelectedCT] = useState<CT | null>(null);
   const [observation, setObservation] = useState('');
+  const [cardQuery, setCardQuery] = useState('');
+  const [cardRanks, setCardRanks] = useState<CardRank[]>([]);
+  const [ctQuery, setCTQuery] = useState('');
+  const [ctRanks, setCTRanks] = useState<Rank[]>([]);
 
   useEffect(() => {
     if (visible) {
       setStep('cards'); setSelectedCards([]); setEditIdx(0); setSelectedCT(null); setObservation('');
+      setCardQuery(''); setCardRanks([]); setCTQuery(''); setCTRanks([]);
     }
   }, [visible]);
 
@@ -357,6 +409,20 @@ function PlayModal({ visible, onClose, cards, cts, onConfirm }:
     if (editIdx + 1 < selectedCards.length) setEditIdx(editIdx + 1);
     else setStep('ct-pick');
   };
+  const toggleCardRank = (rank: CardRank) => setCardRanks((ranks) => ranks.includes(rank) ? ranks.filter(r => r !== rank) : [...ranks, rank]);
+  const toggleCTRank = (rank: Rank) => setCTRanks((ranks) => ranks.includes(rank) ? ranks.filter(r => r !== rank) : [...ranks, rank]);
+  const visibleCards = cards.filter((c) => {
+    const q = cardQuery.trim().toLowerCase();
+    const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''}`.toLowerCase().includes(q);
+    const rankOk = cardRanks.length === 0 || cardRanks.includes(c.rank || 'E');
+    return queryOk && rankOk && canCTUseCard(selectedCT, c);
+  });
+  const visibleCTs = cts.filter((ct) => {
+    const q = ctQuery.trim().toLowerCase();
+    const queryOk = !q || `${ct.name} ${ct.rank} ${ATTRS.map(a => `${a}:${ct.unlimited[a] ? '∞' : (ct.attrs[a] ?? 0)}`).join(' ')}`.toLowerCase().includes(q);
+    const rankOk = ctRanks.length === 0 || ctRanks.includes(ct.rank);
+    return queryOk && rankOk;
+  });
 
   const confirmPlay = () => {
     if (!selectedCT) { Alert.alert('Atenção', 'Selecione O C.T para enviar.'); return; }
@@ -394,15 +460,19 @@ function PlayModal({ visible, onClose, cards, cts, onConfirm }:
             {step === 'cards' && (
               <>
                 {cards.length === 0 && <Text style={styles.empty}>Você não tem cards. Pode prosseguir sem cards.</Text>}
+                <Input label="Buscar card" value={cardQuery} onChangeText={setCardQuery} placeholder="Nome, legenda ou rank" testID="play-card-search" />
+                <View style={styles.chipsRow}>
+                  {CARD_RANKS.map(r => <Chip key={r} label={r} active={cardRanks.includes(r)} onPress={() => toggleCardRank(r)} testID={`play-rank-${r}`} />)}
+                </View>
                 <View style={{ gap: 10 }}>
-                  {cards.map((c) => {
+                  {visibleCards.map((c) => {
                     const active = selectedCards.some(x => x.id === c.id);
                     return (
                       <Pressable key={c.id} onPress={() => toggleCard(c)} testID={`play-card-${c.id}`}
                         style={({ pressed }) => [styles.pickItem, active && styles.pickItemActive, { opacity: pressed ? 0.85 : 1 }]}>
-                        {c.image ? <Image source={{ uri: c.image }} style={styles.cardThumb} /> : <View style={[styles.cardThumb, styles.cardThumbFb]} />}
+                        <ZoomableThumb uri={c.image} onPress={onImagePress} />
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.pickName}>{c.name}</Text>
+                          <Text style={styles.pickName}>{c.name} — {c.rank || 'E'}</Text>
                           <Text style={styles.pickSub} numberOfLines={1}>{c.caption}</Text>
                         </View>
                         {active && <Ionicons name="checkmark-circle" size={20} color={theme.colors.primary} />}
@@ -422,13 +492,17 @@ function PlayModal({ visible, onClose, cards, cts, onConfirm }:
 
             {step === 'ct-pick' && (
               <View style={{ gap: 10 }}>
-                {cts.map((c) => {
+                <Input label="Buscar O C.T" value={ctQuery} onChangeText={setCTQuery} placeholder="Nome, rank ou atributo" testID="play-ct-search" />
+                <View style={styles.chipsRow}>
+                  {CT_RANKS.map(r => <Chip key={r} label={r} active={ctRanks.includes(r)} onPress={() => toggleCTRank(r)} testID={`play-ct-rank-${r}`} />)}
+                </View>
+                {visibleCTs.map((c) => {
                   const active = selectedCT?.id === c.id;
                   return (
                     <Pressable key={c.id} onPress={() => setSelectedCT({ ...c, attrs: { ...c.attrs }, unlimited: { ...c.unlimited } })}
                       testID={`play-ct-${c.id}`}
                       style={({ pressed }) => [styles.pickItem, active && styles.pickItemActive, { opacity: pressed ? 0.85 : 1 }]}>
-                      {c.image ? <Image source={{ uri: c.image }} style={styles.cardThumb} /> : <View style={[styles.cardThumb, styles.cardThumbFb]} />}
+                      <ZoomableThumb uri={c.image} onPress={onImagePress} />
                       <View style={{ flex: 1 }}>
                         <Text style={styles.pickName}>{c.name} — Rank {c.rank}</Text>
                         <Text style={styles.pickSub}>{ATTRS.map(a => `${a}:${c.unlimited[a] ? '∞' : (c.attrs[a] ?? 0)}`).join(' • ')}</Text>
@@ -486,7 +560,7 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
     <View>
       <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 10 }}>
         {card.image ? <Image source={{ uri: card.image }} style={[styles.cardThumb, { width: 50, height: 50 }]} /> : null}
-        <Text style={styles.pickName}>{card.name}</Text>
+        <Text style={styles.pickName}>{card.name} — {card.rank || 'E'}</Text>
       </View>
       <Input label="Legenda (desta jogada)" value={card.caption} onChangeText={(t) => onChange({ caption: t })} multiline numberOfLines={3} style={{ minHeight: 70, textAlignVertical: 'top' }} testID="play-card-caption" />
       <Text style={styles.label}>Custo</Text>
@@ -550,4 +624,11 @@ const styles = StyleSheet.create({
   pickItemActive: { borderColor: theme.colors.borderActive, backgroundColor: 'rgba(255,59,0,0.1)' },
   pickName: { color: '#fff', fontWeight: '800', fontSize: 14 },
   pickSub: { color: theme.colors.textSecondary, fontSize: 11 },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  inlineRank: { alignSelf: 'flex-start', color: '#fff', backgroundColor: theme.colors.primary, overflow: 'hidden', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1, fontSize: 10, fontWeight: '900', marginTop: 2 },
+  inlineRankSpecial: { backgroundColor: theme.colors.gold },
+  zoomWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', alignItems: 'center', justifyContent: 'center' },
+  zoomClose: { position: 'absolute', top: 42, right: 20, zIndex: 2, width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
+  zoomContent: { minHeight: '100%', alignItems: 'center', justifyContent: 'center' },
+  zoomImage: { width: 360, height: 560, maxWidth: '100%' },
 });

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, Image, Pressable } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,44 +7,16 @@ import Button from '../src/components/Button';
 import { Storage } from '../src/storage';
 import { Profile } from '../src/types';
 import { theme } from '../src/theme';
-import audioManager from '../src/services/audioManager';
 
 export default function Home() {
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [muted, setMuted] = useState(audioManager.isMuted());
-
   useFocusEffect(useCallback(() => {
     Storage.getProfile().then(setProfile);
   }, []));
 
-  useEffect(() => {
-    audioManager.play('menu');
-  }, []);
-
-  const toggleMute = async () => {
-    await audioManager.toggleMute();
-    setMuted(audioManager.isMuted());
-  };
-
   return (
     <Screen testID="home-screen">
-      <View style={styles.topActions}>
-        <Pressable
-          onPress={toggleMute}
-          style={({ pressed }) => [
-            styles.soundBtn,
-            { opacity: pressed ? 0.7 : 1 },
-          ]}
-        >
-          <Ionicons
-            name={muted ? 'volume-mute' : 'volume-high'}
-            size={22}
-            color={theme.colors.primary}
-          />
-        </Pressable>
-      </View>
-
       <View style={styles.header}>
         <Text style={styles.brand}>SHINOBI ARENA</Text>
         <Text style={styles.subtitle}>Naruto Card Game</Text>
@@ -100,23 +72,6 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
-  topActions: {
-    alignItems: 'flex-end',
-    marginTop: 6,
-    marginBottom: 6,
-  },
-
-  soundBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
   header: { alignItems: 'center', marginTop: 24, marginBottom: 24 },
   brand: {
     color: theme.colors.textPrimary,

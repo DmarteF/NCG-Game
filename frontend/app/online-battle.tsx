@@ -5,11 +5,13 @@ import { Ionicons } from '@expo/vector-icons';
 import Screen from '../src/components/Screen';
 import Button from '../src/components/Button';
 import Input from '../src/components/Input';
+import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
 import { Card, CT, PlayedCard } from '../src/types';
-import { ATTRS, Attr, theme, RANK_ORDER } from '../src/theme';
+import { ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CT_RANKS, CardRank, Rank } from '../src/theme';
 import { AttrEditor, UnlimitedEditor, sanitizeNum } from './card-edit';
 import { RoomClient, WSEvent } from '../src/online';
+import * as FileSystem from 'expo-file-system/legacy';
 
 type Side = 'me' | 'opp';
 type PlayerInfo = { name: string; village: string; image?: string };
@@ -54,11 +56,16 @@ export default function OnlineBattle() {
   const [timeLeft, setTimeLeft] = useState(turnSeconds);
   const [messages, setMessages] = useState<ChatItem[]>([]);
   const [pickerVisible, setPickerVisible] = useState(false);
+  const [zoomImage, setZoomImage] = useState<string | null>(null);
+  const [chatText, setChatText] = useState('');
   const [result, setResult] = useState('');
 
   const clientRef = useRef<RoomClient | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tickRef = useRef(0);
+  const listRef = useRef<FlatList<ChatItem> | null>(null);
+  const lastActionAtRef = useRef(0);
+  const lastChatAtRef = useRef(0);
 
   // Load local cards/cts
   useEffect(() => {
@@ -103,8 +110,23 @@ export default function OnlineBattle() {
 
   const broadcast = (payload: any) => clientRef.current?.sendRelay(payload);
 
-  const addSystem = (text: string) =>
-    setMessages((m) => [...m, { id: uid(), turn, team: 'system', text, timestamp: Date.now() }]);
+  useEffect(() => {
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 80);
+  }, [messages.length]);
+
+  const canUseTurnAction = () => {
+    if (currentTurn !== 'me') {
+      Alert.alert('Aguarde', 'Não é sua vez.');
+      return false;
+    }
+    const now = Date.now();
+    if (now - lastActionAtRef.current < 2000) {
+      Alert.alert('Aguarde', 'Cooldown de 2 segundos.');
+      return false;
+    }
+    lastActionAtRef.current = now;
+    return true;
+  };
 
   function handleEvent(e: WSEvent) {
     if (e.type === 'ready') {
@@ -143,6 +165,8 @@ export default function OnlineBattle() {
       } else if (p.action === 'play') {
         setMessages((m) => [...m, { id: uid(), turn: p.turn, team: 'opp', timestamp: Date.now(), playedCards: p.cards, ctSnapshot: p.ct, ctObservation: p.observation, finalAttrs: p.finalAttrs }]);
         advanceTurnFromOpponent();
+      } else if (p.action === 'chat') {
+        setMessages((m) => [...m, { id: uid(), turn: p.turn || turn, team: 'opp', text: String(p.text || ''), timestamp: p.timestamp || Date.now() }]);
       } else if (p.action === 'pass') {
         setMessages((m) => [...m, { id: uid(), turn: p.turn, team: 'system', text: `${opponent?.name || 'Oponente'} passou o turno.`, timestamp: Date.now() }]);
         advanceTurnFromOpponent();
@@ -152,8 +176,6 @@ export default function OnlineBattle() {
         endBattle(`${opponent?.name || 'Oponente'} morreu. ${me.name} venceu!`);
       } else if (p.action === 'give_up') {
         endBattle(`${opponent?.name || 'Oponente'} desistiu. ${me.name} venceu!`);
-      } else if (p.action === 'end') {
-        endBattle('Batalha encerrada.');
       } else if (p.action === 'timeout') {
         endBattle(`${opponent?.name || 'Oponente'} perdeu por tempo. ${me.name} venceu!`);
       }
@@ -161,9 +183,9 @@ export default function OnlineBattle() {
   }
 
   // ----- Apresentação -----
-  const confirmInitialCT = () => {
+  const confirmInitialCT = async () => {
     if (!myInitialCT) return Alert.alert('Atenção', 'Selecione seu O C.T inicial.');
-    broadcast({ action: 'initial_ct', ct: myInitialCT });
+    broadcast({ action: 'initial_ct', ct: await withRemoteImageCT(myInitialCT) });
   };
 
   // Host decides starter when both initial CTs ready
@@ -201,14 +223,17 @@ export default function OnlineBattle() {
     setTimeLeft(turnSeconds);
   }
 
-  const sendPlay = (played: PlayedCard[], ctSnap: CT, observation: string, finalAttrs: Record<Attr, number | 'ilimitado'>) => {
+  const sendPlay = async (played: PlayedCard[], ctSnap: CT, observation: string, finalAttrs: Record<Attr, number | 'ilimitado'>) => {
+    if (!canUseTurnAction()) return;
     const myTurn = turn;
     setMessages((m) => [...m, { id: uid(), turn: myTurn, team: 'me', timestamp: Date.now(), playedCards: played, ctSnapshot: ctSnap, ctObservation: observation, finalAttrs }]);
-    broadcast({ action: 'play', turn: myTurn, cards: played, ct: ctSnap, observation, finalAttrs });
+    const remoteCards = await Promise.all(played.map(async p => ({ cardSnapshot: await withRemoteImageCard(p.cardSnapshot) })));
+    broadcast({ action: 'play', turn: myTurn, cards: remoteCards, ct: await withRemoteImageCT(ctSnap), observation, finalAttrs });
     advanceTurnFromMe();
   };
 
   const passTurn = () => {
+    if (!canUseTurnAction()) return;
     const myTurn = turn;
     setMessages((m) => [...m, { id: uid(), turn: myTurn, team: 'system', text: `${me.name} passou o turno.`, timestamp: Date.now() }]);
     broadcast({ action: 'pass', turn: myTurn });
@@ -221,6 +246,7 @@ export default function OnlineBattle() {
   };
 
   const declareDeath = () => {
+    if (!canUseTurnAction()) return;
     Alert.alert('Confirmar morte?', '', [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Sim', onPress: () => {
@@ -230,6 +256,7 @@ export default function OnlineBattle() {
     ]);
   };
   const giveUp = () => {
+    if (!canUseTurnAction()) return;
     Alert.alert('Desistir?', '', [
       { text: 'Cancelar', style: 'cancel' },
       { text: 'Sim', onPress: () => {
@@ -238,20 +265,25 @@ export default function OnlineBattle() {
       }},
     ]);
   };
-  const confirmEnd = () => {
-    Alert.alert('Encerrar luta?', 'Tem certeza?', [
-      { text: 'Cancelar', style: 'cancel' },
-      { text: 'Encerrar', style: 'destructive', onPress: () => {
-        broadcast({ action: 'end' });
-        endBattle('Batalha encerrada.');
-      }},
-    ]);
-  };
   const endBattle = (text: string) => {
     if (timerRef.current) clearInterval(timerRef.current);
     setPhase('ended');
     setResult(text);
     setMessages((m) => [...m, { id: uid(), turn, team: 'system', text, timestamp: Date.now() }]);
+  };
+
+  const sendChat = () => {
+    const text = chatText.trim();
+    if (!text) return;
+    const now = Date.now();
+    if (now - lastChatAtRef.current < 2000) {
+      Alert.alert('Aguarde', 'Cooldown de chat de 2 segundos.');
+      return;
+    }
+    lastChatAtRef.current = now;
+    setChatText('');
+    setMessages((m) => [...m, { id: uid(), turn, team: 'me', text, timestamp: now }]);
+    broadcast({ action: 'chat', turn, text, timestamp: now });
   };
 
   const shareCode = async () => {
@@ -329,26 +361,33 @@ export default function OnlineBattle() {
         <View style={{ flex: 1 }}>
           <Text style={styles.turnTitle}>Turno {turn} • {code}</Text>
           <Text style={styles.turnSub}>{currentTurn === 'me' ? 'Sua vez' : `Vez de ${opponent?.name || 'Oponente'}`}</Text>
+          <Text style={styles.connText}>{connStatus === 'connected' ? 'Conectado' : connStatus}</Text>
         </View>
         <View style={styles.timerBox}><Text style={styles.timerText}>{fmt(timeLeft)}</Text></View>
       </View>
 
       <FlatList
+        ref={listRef}
         data={messages}
         keyExtractor={(i) => i.id}
         contentContainerStyle={{ paddingVertical: 12, gap: 8 }}
-        renderItem={({ item }) => <ChatBubble msg={item} meName={me.name} oppName={opponent?.name || 'Oponente'} />}
+        renderItem={({ item }) => <ChatBubble msg={item} meName={me.name} oppName={opponent?.name || 'Oponente'} onImagePress={setZoomImage} />}
         ListEmptyComponent={<Text style={styles.empty}>Nenhuma jogada ainda.</Text>}
       />
 
       {phase === 'play' ? (
+        <>
+        <View style={styles.chatBar}>
+          <Input label="Chat" value={chatText} onChangeText={setChatText} placeholder="Mensagem" testID="online-chat-input" style={{ minHeight: 42 }} />
+          <Button title="Enviar" onPress={sendChat} testID="online-chat-send" small />
+        </View>
         <View style={styles.actionBar}>
-          <Button title="Jogar" onPress={() => currentTurn === 'me' ? setPickerVisible(true) : Alert.alert('Aguarde', 'Não é sua vez.')} testID="online-play-btn" style={{ flex: 1 }} small />
-          <Button title="Passar" variant="ghost" onPress={() => currentTurn === 'me' ? passTurn() : Alert.alert('Aguarde', 'Não é sua vez.')} testID="online-pass-btn" small />
+          <Button title="Jogar" onPress={() => currentTurn === 'me' ? setPickerVisible(true) : Alert.alert('Aguarde', 'Não é sua vez.')} disabled={currentTurn !== 'me'} testID="online-play-btn" style={{ flex: 1 }} small />
+          <Button title="Passar" variant="ghost" onPress={passTurn} disabled={currentTurn !== 'me'} testID="online-pass-btn" small />
           <Button title="Morte" variant="danger" onPress={declareDeath} testID="online-death-btn" small />
           <Button title="Desistir" variant="danger" onPress={giveUp} testID="online-give-up-btn" small />
-          <Button title="Encerrar" variant="danger" onPress={confirmEnd} testID="online-end-btn" small />
         </View>
+        </>
       ) : (
         <View style={styles.endedBar}>
           <Text style={styles.endedText}>{result}</Text>
@@ -361,8 +400,10 @@ export default function OnlineBattle() {
         onClose={() => setPickerVisible(false)}
         cards={cards}
         cts={cts}
+        onImagePress={setZoomImage}
         onConfirm={(played, ctSnap, obs, finalAttrs) => { setPickerVisible(false); sendPlay(played, ctSnap, obs, finalAttrs); }}
       />
+      <ImageZoomModal uri={zoomImage} onClose={() => setZoomImage(null)} />
     </Screen>
   );
 }
@@ -370,6 +411,22 @@ export default function OnlineBattle() {
 function fmt(s: number) {
   const m = Math.floor(Math.max(0, s) / 60); const r = Math.max(0, s) % 60;
   return `${m.toString().padStart(2, '0')}:${r.toString().padStart(2, '0')}`;
+}
+
+async function fileUriToDataUri(uri?: string) {
+  if (!uri || uri.startsWith('data:') || !uri.startsWith('file://')) return uri;
+  const ext = uri.split('.').pop()?.toLowerCase();
+  const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+  const data = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
+  return `data:${mime};base64,${data}`;
+}
+
+async function withRemoteImageCard(card: Card): Promise<Card> {
+  return { ...card, image: await fileUriToDataUri(card.image) };
+}
+
+async function withRemoteImageCT(ct: CT): Promise<CT> {
+  return { ...ct, image: await fileUriToDataUri(ct.image) };
 }
 
 function SimpleHeader({ title, onBack }: { title: string; onBack: () => void }) {
@@ -395,7 +452,7 @@ function PlayerBadge({ p, label }: { p: { name: string; village: string; image?:
   );
 }
 
-function ChatBubble({ msg, meName, oppName }: { msg: ChatItem; meName: string; oppName: string }) {
+function ChatBubble({ msg, meName, oppName, onImagePress }: { msg: ChatItem; meName: string; oppName: string; onImagePress: (uri: string) => void }) {
   if (msg.team === 'system') {
     return <View style={styles.systemRow}><Text style={styles.systemText}>{msg.text}</Text></View>;
   }
@@ -404,20 +461,24 @@ function ChatBubble({ msg, meName, oppName }: { msg: ChatItem; meName: string; o
     <View style={[styles.bubbleRow, { justifyContent: isMe ? 'flex-end' : 'flex-start' }]}>
       <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleOpp]}>
         <Text style={styles.bubbleHeader}>Turno {msg.turn} • {isMe ? meName : oppName}</Text>
+        {msg.text ? <Text style={styles.chatText}>{msg.text}</Text> : null}
         {msg.playedCards?.map((p, idx) => (
           <View key={idx} style={styles.playedCard}>
             <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-              {p.cardSnapshot.image ? <Image source={{ uri: p.cardSnapshot.image }} style={styles.cardThumb} /> : <View style={[styles.cardThumb, styles.cardThumbFb]} />}
-              <Text style={styles.cardName}>{p.cardSnapshot.name}</Text>
+              <ZoomableThumb uri={p.cardSnapshot.image} onPress={onImagePress} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardName}>{p.cardSnapshot.name}</Text>
+                <RankBadge rank={p.cardSnapshot.rank || 'E'} />
+              </View>
             </View>
-            {p.cardSnapshot.caption ? <Text style={styles.cardCaption}>"{p.cardSnapshot.caption}"</Text> : null}
+            {p.cardSnapshot.caption ? <Text style={styles.cardCaption}>{p.cardSnapshot.caption}</Text> : null}
             {renderEffectLines(p.cardSnapshot)}
           </View>
         ))}
         {msg.ctSnapshot && (
           <View style={styles.ctBlock}>
             <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
-              {msg.ctSnapshot.image ? <Image source={{ uri: msg.ctSnapshot.image }} style={styles.cardThumb} /> : <View style={[styles.cardThumb, styles.cardThumbFb]} />}
+              <ZoomableThumb uri={msg.ctSnapshot.image} onPress={onImagePress} />
               <Text style={styles.cardName}>O C.T {msg.ctSnapshot.name} — Rank {msg.ctSnapshot.rank}</Text>
             </View>
             {msg.finalAttrs && (
@@ -425,7 +486,7 @@ function ChatBubble({ msg, meName, oppName }: { msg: ChatItem; meName: string; o
                 {ATTRS.map((a) => (<Text key={a} style={styles.attrLine}>{a}: {String(msg.finalAttrs![a])}</Text>))}
               </View>
             )}
-            {msg.ctObservation ? <Text style={styles.obs}>Obs: "{msg.ctObservation}"</Text> : null}
+            {msg.ctObservation ? <Text style={styles.obs}>Obs: {msg.ctObservation}</Text> : null}
           </View>
         )}
         <Text style={styles.time}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
@@ -445,9 +506,43 @@ function renderEffectLines(c: Card) {
   return lines.map((l, i) => <Text key={i} style={styles.fxLine}>{l}</Text>);
 }
 
+function ZoomableThumb({ uri, onPress }: { uri?: string; onPress: (uri: string) => void }) {
+  if (!uri) return <View style={[styles.cardThumb, styles.cardThumbFb]} />;
+  return (
+    <Pressable onPress={() => onPress(uri)} hitSlop={8}>
+      <Image source={{ uri }} style={styles.cardThumb} />
+    </Pressable>
+  );
+}
+
+function ImageZoomModal({ uri, onClose }: { uri: string | null; onClose: () => void }) {
+  return (
+    <Modal visible={!!uri} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.zoomWrap}>
+        <Pressable onPress={onClose} style={styles.zoomClose}><Ionicons name="close" size={24} color="#fff" /></Pressable>
+        <ScrollView style={{ flex: 1, alignSelf: 'stretch' }} contentContainerStyle={styles.zoomContent} maximumZoomScale={4} minimumZoomScale={1} centerContent>
+          {uri ? <Image source={{ uri }} style={styles.zoomImage} resizeMode="contain" /> : null}
+        </ScrollView>
+      </View>
+    </Modal>
+  );
+}
+
+function RankBadge({ rank }: { rank: CardRank | Rank }) {
+  return <Text style={[styles.inlineRank, rank === 'S-R' && styles.inlineRankSpecial]}>{rank}</Text>;
+}
+
+function canCTUseCard(ct: CT | null, card: Card) {
+  if (!ct) return true;
+  if (ct.rank === 'B') return ['S-R', 'E', 'D', 'C', 'B'].includes(card.rank || 'E');
+  const order: Record<CardRank, number> = { 'S-R': 0, E: 1, D: 2, C: 3, B: 4, A: 5, S: 6 };
+  return order[card.rank || 'E'] <= order[ct.rank];
+}
+
 // ======= Play Modal (same flow as Teste Local) =======
-function PlayModal({ visible, onClose, cards, cts, onConfirm }:
+function PlayModal({ visible, onClose, cards, cts, onImagePress, onConfirm }:
   { visible: boolean; onClose: () => void; cards: Card[]; cts: CT[];
+    onImagePress: (uri: string) => void;
     onConfirm: (p: PlayedCard[], ct: CT, obs: string, finalAttrs: Record<Attr, number | 'ilimitado'>) => void }) {
 
   const [step, setStep] = useState<'cards' | 'card-edit' | 'ct-pick' | 'ct-edit'>('cards');
@@ -455,9 +550,16 @@ function PlayModal({ visible, onClose, cards, cts, onConfirm }:
   const [editIdx, setEditIdx] = useState(0);
   const [selectedCT, setSelectedCT] = useState<CT | null>(null);
   const [observation, setObservation] = useState('');
+  const [cardQuery, setCardQuery] = useState('');
+  const [cardRanks, setCardRanks] = useState<CardRank[]>([]);
+  const [ctQuery, setCTQuery] = useState('');
+  const [ctRanks, setCTRanks] = useState<Rank[]>([]);
 
   useEffect(() => {
-    if (visible) { setStep('cards'); setSelectedCards([]); setEditIdx(0); setSelectedCT(null); setObservation(''); }
+    if (visible) {
+      setStep('cards'); setSelectedCards([]); setEditIdx(0); setSelectedCT(null); setObservation('');
+      setCardQuery(''); setCardRanks([]); setCTQuery(''); setCTRanks([]);
+    }
   }, [visible]);
 
   const toggleCard = (c: Card) => {
@@ -469,6 +571,20 @@ function PlayModal({ visible, onClose, cards, cts, onConfirm }:
 
   const goEditCards = () => { if (selectedCards.length === 0) setStep('ct-pick'); else { setEditIdx(0); setStep('card-edit'); } };
   const finishCardEdits = () => { if (editIdx + 1 < selectedCards.length) setEditIdx(editIdx + 1); else setStep('ct-pick'); };
+  const toggleCardRank = (rank: CardRank) => setCardRanks((ranks) => ranks.includes(rank) ? ranks.filter(r => r !== rank) : [...ranks, rank]);
+  const toggleCTRank = (rank: Rank) => setCTRanks((ranks) => ranks.includes(rank) ? ranks.filter(r => r !== rank) : [...ranks, rank]);
+  const visibleCards = cards.filter((c) => {
+    const q = cardQuery.trim().toLowerCase();
+    const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''}`.toLowerCase().includes(q);
+    const rankOk = cardRanks.length === 0 || cardRanks.includes(c.rank || 'E');
+    return queryOk && rankOk && canCTUseCard(selectedCT, c);
+  });
+  const visibleCTs = cts.filter((ct) => {
+    const q = ctQuery.trim().toLowerCase();
+    const queryOk = !q || `${ct.name} ${ct.rank} ${ATTRS.map(a => `${a}:${ct.unlimited[a] ? '∞' : (ct.attrs[a] ?? 0)}`).join(' ')}`.toLowerCase().includes(q);
+    const rankOk = ctRanks.length === 0 || ctRanks.includes(ct.rank);
+    return queryOk && rankOk;
+  });
 
   const confirmPlay = () => {
     if (!selectedCT) return Alert.alert('Atenção', 'Selecione O C.T para enviar.');
@@ -504,15 +620,19 @@ function PlayModal({ visible, onClose, cards, cts, onConfirm }:
             {step === 'cards' && (
               <>
                 {cards.length === 0 && <Text style={styles.empty}>Sem cards. Pode prosseguir sem cards.</Text>}
+                <Input label="Buscar card" value={cardQuery} onChangeText={setCardQuery} placeholder="Nome, legenda ou rank" testID="online-play-card-search" />
+                <View style={styles.chipsRow}>
+                  {CARD_RANKS.map(r => <Chip key={r} label={r} active={cardRanks.includes(r)} onPress={() => toggleCardRank(r)} testID={`online-play-rank-${r}`} />)}
+                </View>
                 <View style={{ gap: 10 }}>
-                  {cards.map((c) => {
+                  {visibleCards.map((c) => {
                     const active = selectedCards.some(x => x.id === c.id);
                     return (
                       <Pressable key={c.id} onPress={() => toggleCard(c)} testID={`online-play-card-${c.id}`}
                         style={({ pressed }) => [styles.pickItem, active && styles.pickItemActive, { opacity: pressed ? 0.85 : 1 }]}>
-                        {c.image ? <Image source={{ uri: c.image }} style={styles.cardThumb} /> : <View style={[styles.cardThumb, styles.cardThumbFb]} />}
+                        <ZoomableThumb uri={c.image} onPress={onImagePress} />
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.pickName}>{c.name}</Text>
+                          <Text style={styles.pickName}>{c.name} — {c.rank || 'E'}</Text>
                           <Text style={styles.pickSub} numberOfLines={1}>{c.caption}</Text>
                         </View>
                         {active && <Ionicons name="checkmark-circle" size={20} color={theme.colors.primary} />}
@@ -529,13 +649,17 @@ function PlayModal({ visible, onClose, cards, cts, onConfirm }:
 
             {step === 'ct-pick' && (
               <View style={{ gap: 10 }}>
-                {cts.map((c) => {
+                <Input label="Buscar O C.T" value={ctQuery} onChangeText={setCTQuery} placeholder="Nome, rank ou atributo" testID="online-play-ct-search" />
+                <View style={styles.chipsRow}>
+                  {CT_RANKS.map(r => <Chip key={r} label={r} active={ctRanks.includes(r)} onPress={() => toggleCTRank(r)} testID={`online-play-ct-rank-${r}`} />)}
+                </View>
+                {visibleCTs.map((c) => {
                   const active = selectedCT?.id === c.id;
                   return (
                     <Pressable key={c.id} onPress={() => setSelectedCT({ ...c, attrs: { ...c.attrs }, unlimited: { ...c.unlimited } })}
                       testID={`online-play-ct-${c.id}`}
                       style={({ pressed }) => [styles.pickItem, active && styles.pickItemActive, { opacity: pressed ? 0.85 : 1 }]}>
-                      {c.image ? <Image source={{ uri: c.image }} style={styles.cardThumb} /> : <View style={[styles.cardThumb, styles.cardThumbFb]} />}
+                      <ZoomableThumb uri={c.image} onPress={onImagePress} />
                       <View style={{ flex: 1 }}>
                         <Text style={styles.pickName}>{c.name} — Rank {c.rank}</Text>
                         <Text style={styles.pickSub}>{ATTRS.map(a => `${a}:${c.unlimited[a] ? '∞' : (c.attrs[a] ?? 0)}`).join(' • ')}</Text>
@@ -593,7 +717,7 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
     <View>
       <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 10 }}>
         {card.image ? <Image source={{ uri: card.image }} style={[styles.cardThumb, { width: 50, height: 50 }]} /> : null}
-        <Text style={styles.pickName}>{card.name}</Text>
+        <Text style={styles.pickName}>{card.name} — {card.rank || 'E'}</Text>
       </View>
       <Input label="Legenda (desta jogada)" value={card.caption} onChangeText={(t) => onChange({ caption: t })} multiline numberOfLines={3} style={{ minHeight: 70, textAlignVertical: 'top' }} testID="online-play-card-caption" />
       <Text style={styles.label}>Custo</Text>
@@ -631,6 +755,7 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 8, borderBottomWidth: 1, borderColor: theme.colors.border },
   turnTitle: { color: '#fff', fontSize: 15, fontWeight: '900', letterSpacing: 1 },
   turnSub: { color: theme.colors.neon, fontSize: 11, fontWeight: '700', letterSpacing: 1, textTransform: 'uppercase' },
+  connText: { color: theme.colors.success, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', marginTop: 2 },
   timerBox: { paddingHorizontal: 12, paddingVertical: 6, backgroundColor: 'rgba(255,59,0,0.18)', borderRadius: 10, borderWidth: 1, borderColor: theme.colors.borderActive },
   timerText: { color: '#fff', fontSize: 16, fontWeight: '900', letterSpacing: 1 },
 
@@ -653,12 +778,14 @@ const styles = StyleSheet.create({
   cardThumbFb: { borderWidth: 1, borderColor: theme.colors.border },
   cardName: { color: '#fff', fontWeight: '800', fontSize: 13 },
   cardCaption: { color: theme.colors.textSecondary, fontSize: 12, fontStyle: 'italic' },
+  chatText: { color: '#fff', fontSize: 13, lineHeight: 18 },
   fxLine: { color: theme.colors.neon, fontSize: 11, fontWeight: '700' },
   ctBlock: { backgroundColor: 'rgba(255,215,0,0.06)', padding: 8, borderRadius: 10, marginTop: 6, borderWidth: 1, borderColor: 'rgba(255,215,0,0.2)' },
   attrLine: { color: '#fff', fontSize: 12 },
   obs: { color: theme.colors.textSecondary, fontStyle: 'italic', fontSize: 12, marginTop: 4 },
   time: { color: theme.colors.textMuted, fontSize: 10, marginTop: 4, textAlign: 'right' },
 
+  chatBar: { paddingTop: 8, borderTopWidth: 1, borderColor: theme.colors.border, gap: 8 },
   actionBar: { flexDirection: 'row', gap: 6, paddingTop: 8, borderTopWidth: 1, borderColor: theme.colors.border, flexWrap: 'wrap' },
   endedBar: { gap: 10, paddingTop: 12, borderTopWidth: 1, borderColor: theme.colors.border, alignItems: 'center' },
   endedText: { color: '#fff', fontWeight: '900', fontSize: 14, textAlign: 'center' },
@@ -672,4 +799,11 @@ const styles = StyleSheet.create({
   pickItemActive: { borderColor: theme.colors.borderActive, backgroundColor: 'rgba(255,59,0,0.1)' },
   pickName: { color: '#fff', fontWeight: '800', fontSize: 14 },
   pickSub: { color: theme.colors.textSecondary, fontSize: 11 },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  inlineRank: { alignSelf: 'flex-start', color: '#fff', backgroundColor: theme.colors.primary, overflow: 'hidden', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1, fontSize: 10, fontWeight: '900', marginTop: 2 },
+  inlineRankSpecial: { backgroundColor: theme.colors.gold },
+  zoomWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', alignItems: 'center', justifyContent: 'center' },
+  zoomClose: { position: 'absolute', top: 42, right: 20, zIndex: 2, width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
+  zoomContent: { minHeight: '100%', alignItems: 'center', justifyContent: 'center' },
+  zoomImage: { width: 360, height: 560, maxWidth: '100%' },
 });
