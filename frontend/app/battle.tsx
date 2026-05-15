@@ -13,7 +13,7 @@ import { ATTRS, CT_ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CARD_RANK_ORDER, 
 import { AttrEditor, UnlimitedEditor } from './card-edit';
 import { ctDisplayName, formatNumberBR, formatSpeed } from '../src/format';
 import { applyUpkeep, resolveCombat, subtractAttrs, visibleFinalAttrs } from '../src/combat';
-import { BossState, createBossCT, createKaelzorState } from '../src/bossData';
+import { BossState, bossCardToSnapshot, createBossCT, createKaelzorState } from '../src/bossData';
 import { PlayerActionAnalysis, resolveBossAttack, resolveBossDefense } from '../src/bossRules';
 
 type Team = 'team1' | 'team2';
@@ -191,23 +191,21 @@ export default function Battle() {
     const playerCT = { ...initCT1, attrs: battleAttrs.team1 as Record<Attr, number> };
     const attack = resolveBossAttack(bossState, playerCT, battleAttrs.team1, lastBossAnalysisRef.current);
     const nextBossCT = createBossCT(attack.boss);
+    const bossCard = attack.card
+      ? bossCardToSnapshot(attack.card, `ENE restante: ${formatNumberBR(attack.boss.stats.Ene)}\nDano possível: ${formatNumberBR(attack.damagePossible)}\nAguardando resposta do jogador.`)
+      : undefined;
     setBossState(attack.boss);
-    setBattleAttrs((attrs) => ({ ...attrs, team1: attack.playerAttrs, team2: ctToBattleAttrs(nextBossCT) }));
-    const bossMsg: ChatMsg = { id: uid(), turn, team: 'team2', text: attack.lines.join('\n'), timestamp: Date.now(), ctSnapshot: nextBossCT, finalAttrs: ctToBattleAttrs(nextBossCT) };
-    if (attack.defeatedPlayer) {
-      const finalText = 'Kael’Zor venceu após validar dano e alvo atingido.';
-      setPhase('ended');
-      setResult(finalText);
-      setMessages((m) => {
-        const next = [...m, bossMsg, { id: uid(), turn, team: 'system' as const, text: finalText, timestamp: Date.now() }];
-        Storage.appendHistory({
-          id: uid(), endedAt: Date.now(), result: finalText, messages: next,
-          config: { matchType: matchType as MatchType, turnMinutes: null, startedAt: Date.now(), bossDifficulty: difficulty },
-        });
-        return next;
-      });
-      return;
-    }
+    setBattleAttrs((attrs) => ({ ...attrs, team2: ctToBattleAttrs(nextBossCT) }));
+    const bossMsg: ChatMsg = {
+      id: uid(),
+      turn,
+      team: 'team2',
+      text: attack.lines.join('\n'),
+      timestamp: Date.now(),
+      playedCards: bossCard ? [{ cardSnapshot: bossCard }] : undefined,
+      ctSnapshot: nextBossCT,
+      finalAttrs: ctToBattleAttrs(nextBossCT),
+    };
     setMessages((m) => [...m, bossMsg]);
     advanceTurn();
   };

@@ -29,7 +29,9 @@ export type BossDefenseResult = {
 
 export type BossAttackResult = {
   boss: BossState;
+  card?: BossCard;
   playerAttrs: Record<Attr, number | 'ilimitado'>;
+  damagePossible: number;
   defeatedPlayer: boolean;
   lines: string[];
 };
@@ -224,7 +226,8 @@ export function resolveBossAttack(
   const attack = chooseAttack(boss, analysis);
   if (!attack) {
     lines.push('Kael’Zor não encontrou ENE/AG suficiente para atacar neste turno.');
-    return { boss: { ...boss, turn: boss.turn + 1 }, playerAttrs, defeatedPlayer: false, lines };
+    lines.push('Aguardando resposta do jogador.');
+    return { boss: { ...boss, turn: boss.turn + 1 }, playerAttrs, damagePossible: 0, defeatedPlayer: false, lines };
   }
   const targets = Math.max(1, analysis?.cloneCount || analysis?.declaredTargets || 1);
   const hitTargets = Math.min(targets, attack.maxTargets || 1);
@@ -234,7 +237,6 @@ export function resolveBossAttack(
   const playerDef = numeric(playerAttrs.Def);
   const damage = Math.max(0, numeric(attack.atk) - playerDef);
   const nextPlayerAttrs = { ...playerAttrs };
-  if (nextPlayerAttrs.Hp !== 'ilimitado') nextPlayerAttrs.Hp = Math.max(0, numeric(nextPlayerAttrs.Hp) - damage);
 
   lines.push(`Kael’Zor escolheu ${attack.name}.`);
   lines.push(`Motivo: ${targets <= 1 ? 'alvo único' : targets <= 3 ? 'até três alvos' : targets <= 20 ? 'grupo médio' : 'muitos alvos declarados'}.`);
@@ -243,7 +245,7 @@ export function resolveBossAttack(
   if (hitTargets < targets) lines.push(`${targets - hitTargets} alvo(s) podem permanecer fora do alcance desta técnica.`);
   lines.push(`Def atual de ${playerCT?.name?.trim() || 'O C.T'}: ${formatNumberBR(playerDef)}.`);
   lines.push(`Dano possível no HP principal: ${formatNumberBR(damage)}.`);
-  lines.push(`HP atual do jogador: ${formatNumberBR(nextPlayerAttrs.Hp)}.`);
   lines.push(`ENE restante do Boss: ${formatNumberBR(nextBoss.stats.Ene)}.`);
-  return { boss: nextBoss, playerAttrs: nextPlayerAttrs, defeatedPlayer: numeric(nextPlayerAttrs.Hp) <= 0, lines };
+  lines.push('Aguardando resposta do jogador. Nenhuma vitória automática foi aplicada.');
+  return { boss: nextBoss, card: attack, playerAttrs: nextPlayerAttrs, damagePossible: damage, defeatedPlayer: false, lines };
 }

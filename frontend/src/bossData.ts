@@ -1,5 +1,7 @@
+import { Image } from 'react-native';
+import { formatNumberBR, formatSpeed } from './format';
 import { Attr } from './theme';
-import { BossDifficulty, BossStats, CardSpeed, CT } from './types';
+import { BossDifficulty, BossStats, Card, CardActionType, CardSpeed, CardType, CT } from './types';
 
 export type BossCardKind = 'perception' | 'mental' | 'movement' | 'defense' | 'equipment' | 'mode' | 'attack';
 
@@ -8,6 +10,7 @@ export type BossCard = {
   name: string;
   kind: BossCardKind;
   rank: 'B';
+  image?: string;
   speed?: CardSpeed;
   atk?: number;
   def?: number;
@@ -15,6 +18,28 @@ export type BossCard = {
   maxTargets?: number;
   cooldownTurns?: number;
   notes: string;
+};
+
+const assetUri = (asset: number) => Image.resolveAssetSource(asset).uri;
+
+const BOSS_CT_IMAGE = assetUri(require('../assets/boss/CT_Boss.jpeg'));
+
+const BOSS_CARD_IMAGES: Record<string, string> = {
+  'selo-olho-abissal-boss': assetUri(require('../assets/boss/Selo_Boss.jpeg')),
+  'olhos-vazio-rachado-boss': assetUri(require('../assets/boss/Olhos_Boss.jpeg')),
+  'mente-vazia-boss': assetUri(require('../assets/boss/Mente_Boss.jpeg')),
+  'passo-instavel-boss': assetUri(require('../assets/boss/Passo_Boss.jpeg')),
+  'deslocamento-vazio-rachado-boss': assetUri(require('../assets/boss/Deslocamento_Boss.jpeg')),
+  'barreira-rachada-boss': assetUri(require('../assets/boss/Barreira_Boss.jpeg')),
+  'cupula-vazio-boss': assetUri(require('../assets/boss/Cupula_Boss.jpeg')),
+  'reflexo-abissal-boss': assetUri(require('../assets/boss/Reflexo_Boss.jpeg')),
+  'armadura-abismo-partido-boss': assetUri(require('../assets/boss/Armadura_Boss.jpeg')),
+  'fragmento-vazio-boss': assetUri(require('../assets/boss/Fragmento_Boss.jpeg')),
+  'corte-vazio-boss': assetUri(require('../assets/boss/Corte_Boss.jpeg')),
+  'lanca-fragmentada-boss': assetUri(require('../assets/boss/Lanca_Boss.jpeg')),
+  'chuva-estilhacos-rubros-boss': assetUri(require('../assets/boss/Chuva_Boss.jpeg')),
+  'onda-abismo-partido-boss': assetUri(require('../assets/boss/Onda_Boss.jpeg')),
+  'ruptura-vazio-menor-boss': assetUri(require('../assets/boss/Ruptura_Boss.jpeg')),
 };
 
 export type BossState = {
@@ -71,6 +96,7 @@ export function createBossCT(state: BossState): CT {
     id: 'kaelzor-fragmento-boss',
     name: `${state.name} — ${state.title}`,
     rank: state.rank,
+    image: BOSS_CT_IMAGE,
     attrs: {
       Atk: state.stats.Atk,
       Def: state.stats.Def,
@@ -85,4 +111,43 @@ export function createBossCT(state: BossState): CT {
 
 export function bossCard(id: string) {
   return KAELZOR_BOSS_CARDS.find(card => card.id === id);
+}
+
+function bossCardType(kind: BossCardKind): { cardType: CardType; actionType: CardActionType } {
+  if (kind === 'attack') return { cardType: 'técnica', actionType: 'attack' };
+  if (kind === 'defense' || kind === 'mental' || kind === 'movement' || kind === 'perception') return { cardType: 'técnica', actionType: 'defense' };
+  if (kind === 'equipment') return { cardType: 'arma/equipamento', actionType: 'equipment' };
+  return { cardType: 'modo/buff', actionType: 'mode' };
+}
+
+export function bossCardToSnapshot(card: BossCard, extraCaption?: string): Card {
+  const cost = Object.entries(card.cost || {}).map(([attr, value]) => `${attr}: ${formatNumberBR(value)}`).join(', ');
+  const details = [
+    card.notes,
+    card.atk ? `Atk: ${formatNumberBR(card.atk)}` : '',
+    card.def ? `Def: ${formatNumberBR(card.def)}` : '',
+    formatSpeed(card.speed),
+    cost ? `Custo: ${cost}` : '',
+    card.maxTargets ? `Alvos máximos: ${card.maxTargets}` : '',
+    extraCaption,
+  ].filter(Boolean).join('\n');
+  const type = bossCardType(card.kind);
+  return {
+    id: card.id,
+    name: card.name,
+    caption: details,
+    image: card.image || BOSS_CARD_IMAGES[card.id],
+    rank: card.rank,
+    speed: card.speed,
+    cardType: type.cardType,
+    actionType: type.actionType,
+    momentaryAttrs: {
+      ...(card.atk ? { Atk: card.atk } : {}),
+      ...(card.def ? { Def: card.def } : {}),
+    },
+    effect: 'none',
+    cost: {},
+    boost: {},
+    unlimited: {},
+  };
 }
