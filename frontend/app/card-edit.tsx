@@ -7,7 +7,7 @@ import Input from '../src/components/Input';
 import ImagePickerField from '../src/components/ImagePickerField';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
-import { Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType } from '../src/types';
+import { Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType, CardType, DurationType } from '../src/types';
 import { ATTRS, Attr, theme, CARD_RANKS, CardRank } from '../src/theme';
 import { Header } from './profile';
 import { formatNumberBR } from '../src/format';
@@ -19,7 +19,16 @@ const EFFECTS: { id: CardEffect; label: string }[] = [
   { id: 'cost_boost', label: 'Custo e aumento' },
   { id: 'unlimited', label: 'Atributo ilimitado' },
 ];
-const ENTITY_TYPES: EntityType[] = ['invocação', 'marionete', 'edo tensei', 'entidade', 'criatura'];
+const ENTITY_TYPES: EntityType[] = ['invocação', 'marionete', 'edo tensei'];
+const CARD_TYPES: { id: CardType; label: string }[] = [
+  { id: 'técnica', label: 'Técnica' },
+  { id: 'modo/buff', label: 'Modo/buff' },
+  { id: 'arma/equipamento', label: 'Arma/equip.' },
+  { id: 'invocação', label: 'Invocação' },
+  { id: 'edo tensei', label: 'Edo tensei' },
+  { id: 'marionete', label: 'Marionete' },
+];
+const DURATIONS: DurationType[] = ['instantâneo', 'turnos', 'manual', 'destruir', 'luta'];
 const ACTION_TYPES: { id: CardActionType; label: string }[] = [
   { id: 'attribute', label: 'Atributo/buff' },
   { id: 'attack', label: 'Ataque' },
@@ -37,9 +46,13 @@ export default function CardEdit() {
   const [image, setImage] = useState<string | undefined>();
   const [rank, setRank] = useState<CardRank>('E');
   const [speed, setSpeed] = useState(0);
+  const [cardType, setCardType] = useState<CardType>('técnica');
   const [actionType, setActionType] = useState<CardActionType>('attribute');
   const [momentaryAttrs, setMomentaryAttrs] = useState<AttrValues>({});
   const [useCTInfluence, setUseCTInfluence] = useState(false);
+  const [durationType, setDurationType] = useState<DurationType>('instantâneo');
+  const [durationTurns, setDurationTurns] = useState(0);
+  const [upkeepCost, setUpkeepCost] = useState<AttrValues>({});
   const [effect, setEffect] = useState<CardEffect>('none');
   const [entityType, setEntityType] = useState<EntityType | undefined>();
   const [entityAttrs, setEntityAttrs] = useState<Record<Attr, number>>({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
@@ -54,9 +67,13 @@ export default function CardEdit() {
       if (c) {
         setName(c.name); setCaption(c.caption); setImage(c.image);
         setRank(c.rank || 'E'); setSpeed(clampSpeed(c.speed)); setEntityType(c.entityType);
+        setCardType(c.cardType || (c.entityType ? c.entityType === 'edo tensei' ? 'edo tensei' : c.entityType === 'marionete' ? 'marionete' : 'invocação' : 'técnica'));
         setActionType(c.actionType || (c.entityType ? 'entity' : 'attribute'));
         setMomentaryAttrs(c.momentaryAttrs || {});
         setUseCTInfluence(!!c.useCTInfluence);
+        setDurationType(c.durationType || 'instantâneo');
+        setDurationTurns(c.durationTurns || 0);
+        setUpkeepCost(c.upkeepCost || {});
         setEntityAttrs({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0, ...(c.entityAttrs || {}) });
         setEffect(c.effect); setCost(c.cost); setBoost(c.boost); setUnlimited(c.unlimited);
       }
@@ -72,11 +89,15 @@ export default function CardEdit() {
       image,
       rank,
       speed: clampSpeed(speed),
+      cardType,
       actionType,
       momentaryAttrs: cleanAttrs(momentaryAttrs),
       useCTInfluence,
+      durationType,
+      durationTurns: sanitizeNum(String(durationTurns)),
+      upkeepCost: cleanAttrs(upkeepCost),
       effect,
-      entityType,
+      entityType: ['invocação', 'edo tensei', 'marionete'].includes(cardType) ? (cardType as EntityType) : entityType,
       entityAttrs: entityType ? entityAttrs : undefined,
       entityUnlimited: undefined,
       cost: cleanAttrs(cost),
@@ -89,9 +110,6 @@ export default function CardEdit() {
     router.back();
   };
 
-  const showCost = effect === 'cost' || effect === 'cost_boost';
-  const showBoost = effect === 'boost' || effect === 'cost_boost';
-  const showUnl = effect === 'unlimited';
   const showMomentary = actionType === 'attack' || actionType === 'defense' || actionType === 'equipment';
 
   return (
@@ -120,6 +138,27 @@ export default function CardEdit() {
         placeholder="0"
         testID="card-speed-input"
       />
+
+      <Text style={styles.label}>Categoria RPG</Text>
+      <View style={styles.chipsRow}>
+        {CARD_TYPES.map(t => (
+          <Chip
+            key={t.id}
+            label={t.label}
+            active={cardType === t.id}
+            onPress={() => {
+              setCardType(t.id);
+              if (t.id === 'arma/equipamento') setActionType('equipment');
+              if (t.id === 'modo/buff') setActionType('mode');
+              if (['invocação', 'edo tensei', 'marionete'].includes(t.id)) {
+                setActionType('entity');
+                setEntityType(t.id as EntityType);
+              }
+            }}
+            testID={`card-type-${t.id}`}
+          />
+        ))}
+      </View>
 
       <Text style={styles.label}>Tipo de uso</Text>
       <View style={styles.chipsRow}>
@@ -187,9 +226,20 @@ export default function CardEdit() {
         ))}
       </View>
 
-      {showCost && <AttrEditor label="Custo" values={cost} setValues={setCost} keyPrefix="cost" />}
-      {showBoost && <AttrEditor label="Aumento" values={boost} setValues={setBoost} keyPrefix="boost" />}
-      {showUnl && <UnlimitedEditor unlimited={unlimited} setUnlimited={setUnlimited} />}
+      <AttrEditor label="Custo" values={cost} setValues={setCost} keyPrefix="cost" />
+      <AttrEditor label="Aumento" values={boost} setValues={setBoost} keyPrefix="boost" />
+      <UnlimitedEditor unlimited={unlimited} setUnlimited={setUnlimited} />
+
+      <Text style={styles.label}>Duração persistente</Text>
+      <View style={styles.chipsRow}>
+        {DURATIONS.map(d => (
+          <Chip key={d} label={d} active={durationType === d} onPress={() => setDurationType(d)} testID={`duration-${d}`} />
+        ))}
+      </View>
+      {durationType === 'turnos' ? (
+        <Input label="Quantidade de turnos" value={String(durationTurns)} onChangeText={(t) => setDurationTurns(sanitizeNum(t))} keyboardType="numeric" testID="duration-turns-input" />
+      ) : null}
+      <AttrEditor label="Custo por turno" values={upkeepCost} setValues={setUpkeepCost} keyPrefix="upkeep" />
 
       <View style={styles.actions}>
         <Button title="Cancelar" variant="ghost" onPress={() => router.back()} testID="card-cancel-btn" />

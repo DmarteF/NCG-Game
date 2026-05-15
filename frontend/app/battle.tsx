@@ -37,6 +37,7 @@ export default function Battle() {
   const [pickerVisible, setPickerVisible] = useState(false);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   const [localChatText, setLocalChatText] = useState('');
+  const [disabledActiveIds, setDisabledActiveIds] = useState<string[]>([]);
   const [result, setResult] = useState<string>('');
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -65,6 +66,10 @@ export default function Battle() {
   }, [phase, currentTeam, isBoss, turnSeconds]);
 
   const t2Label = isBoss ? 'Boss' : 'Time 2';
+  const activeCards = messages.flatMap((msg) => msg.playedCards || [])
+    .map((p) => p.cardSnapshot)
+    .filter((card) => card.durationType && card.durationType !== 'instantâneo')
+    .filter((card) => !disabledActiveIds.includes(card.id));
 
   const startPresentation = () => {
     if (!initCT1 || !initCT2) {
@@ -196,6 +201,9 @@ export default function Battle() {
       </View>
 
       <FlatList
+        ListHeaderComponent={activeCards.length > 0 ? (
+          <ActiveCardsBar cards={activeCards} onDisable={(id) => setDisabledActiveIds((ids) => [...ids, id])} />
+        ) : null}
         data={messages}
         keyExtractor={(i) => i.id}
         contentContainerStyle={{ paddingVertical: 12, gap: 8 }}
@@ -239,6 +247,24 @@ export default function Battle() {
       />
       <ZoomableImageModal uri={zoomImage} onClose={() => setZoomImage(null)} />
     </Screen>
+  );
+}
+
+function ActiveCardsBar({ cards, onDisable }: { cards: Card[]; onDisable: (id: string) => void }) {
+  return (
+    <View style={styles.activeBar}>
+      <Text style={styles.label}>Ativos da luta</Text>
+      {cards.map(card => {
+        const upkeep = ATTRS.filter(a => card.upkeepCost?.[a] != null).map(a => `${a}:${formatNumberBR(card.upkeepCost?.[a])}`).join(' • ');
+        return (
+          <View key={card.id} style={styles.activeItem}>
+            <Text style={styles.cardName}>{card.name} • {card.cardType || 'técnica'}</Text>
+            <Text style={styles.obs}>Duração: {card.durationType}{card.durationType === 'turnos' ? ` (${card.durationTurns || 0} turnos)` : ''}{upkeep ? ` • Custo/turno: ${upkeep}` : ''}</Text>
+            <Pressable onPress={() => onDisable(card.id)} style={styles.activeDisable}><Text style={styles.activeDisableText}>Desativar</Text></Pressable>
+          </View>
+        );
+      })}
+    </View>
   );
 }
 
@@ -297,7 +323,7 @@ function ChatBubble({ msg, t2Label, onImagePress }: { msg: ChatMsg; t2Label: str
               </View>
             </View>
             {p.cardSnapshot.caption ? <Text style={styles.cardCaption}>{p.cardSnapshot.caption}</Text> : null}
-            {renderEffectLines(p.cardSnapshot)}
+            {renderEffectLines(p.cardSnapshot, msg.momentaryActions?.find(action => action.cardId === p.cardSnapshot.id))}
           </View>
         ))}
 
@@ -331,7 +357,6 @@ function ChatBubble({ msg, t2Label, onImagePress }: { msg: ChatMsg; t2Label: str
             ) : null}
           </View>
         ) : null}
-        {msg.momentaryActions?.map(action => <MomentaryBlock key={action.cardId} action={action} />)}
 
         <Text style={styles.time}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
       </View>
@@ -339,32 +364,33 @@ function ChatBubble({ msg, t2Label, onImagePress }: { msg: ChatMsg; t2Label: str
   );
 }
 
-function renderEffectLines(c: Card) {
+function renderEffectLines(c: Card, action?: MomentaryAction) {
   const lines: string[] = [];
   const cost = ATTRS.filter(a => c.cost[a] != null).map(a => `${a}: ${formatNumberBR(c.cost[a])}`).join(', ');
   const boost = ATTRS.filter(a => c.boost[a] != null).map(a => `${a}: ${formatNumberBR(c.boost[a])}`).join(', ');
   const unl = ATTRS.filter(a => c.unlimited[a]).map(a => `${a}: ilimitado`).join(', ');
-  const momentary = ATTRS.filter(a => c.momentaryAttrs?.[a] != null).map(a => `${a}: ${formatNumberBR(c.momentaryAttrs?.[a])}`).join(', ');
-  if (momentary) lines.push(`Ação: ${momentary}${c.useCTInfluence ? ' + atributo base' : ''}`);
+  if (action) {
+    for (const attr of ATTRS.filter(a => action.final[a] != null)) {
+      lines.push(`${attr} final: ${formatNumberBR(action.final[attr])}`);
+      const own = action.own[attr] || 0;
+      if (action.usedCTInfluence) {
+        const influence = (action.final[attr] || 0) - own;
+        lines.push(`Base técnica: ${formatNumberBR(own)}`);
+        lines.push(`Influência ${action.source === 'entity' ? 'invocação' : 'C.T'}: +${formatNumberBR(influence)}`);
+      }
+    }
+  } else {
+    const momentary = ATTRS.filter(a => c.momentaryAttrs?.[a] != null).map(a => `${a}: ${formatNumberBR(c.momentaryAttrs?.[a])}`).join(', ');
+    if (momentary) lines.push(`Ação: ${momentary}`);
+  }
   if (cost) lines.push(`Custo: ${cost}`);
   if (boost) lines.push(`Aumento: ${boost}`);
   if (unl) lines.push(unl);
+  const upkeep = ATTRS.filter(a => c.upkeepCost?.[a] != null).map(a => `${a}: ${formatNumberBR(c.upkeepCost?.[a])}`).join(', ');
+  if (c.durationType && c.durationType !== 'instantâneo') lines.push(`Persistente: ${c.durationType}${c.durationType === 'turnos' ? ` (${c.durationTurns || 0} turnos)` : ''}`);
+  if (upkeep) lines.push(`Custo por turno: ${upkeep}`);
   lines.push(`Speed: ${c.speed ?? 0}`);
   return lines.map((l, i) => <Text key={i} style={styles.fxLine}>{l}</Text>);
-}
-
-function MomentaryBlock({ action }: { action: MomentaryAction }) {
-  const title = action.type === 'attack' ? 'Ataque momentâneo' : action.type === 'defense' ? 'Defesa momentânea' : 'Arma/equipamento';
-  const own = ATTRS.filter(a => action.own[a] != null).map(a => `${a}: ${formatNumberBR(action.own[a])}`).join(' • ');
-  const final = ATTRS.filter(a => action.final[a] != null).map(a => `${a}: ${formatNumberBR(action.final[a])}`).join(' • ');
-  return (
-    <View style={styles.ctBlock}>
-      <Text style={styles.cardName}>{title}: {action.cardName}</Text>
-      <Text style={styles.attrLine}>Próprio: {own || '0'}</Text>
-      <Text style={styles.attrLine}>Influência: {action.usedCTInfluence ? (action.source === 'entity' ? 'Invocação' : 'O C.T') : 'Não'}</Text>
-      <Text style={styles.attrLine}>Final: {final || '0'}</Text>
-    </View>
-  );
 }
 
 function ZoomableThumb({ uri, onPress }: { uri?: string; onPress: (uri: string) => void }) {
@@ -411,23 +437,26 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
   const [editIdx, setEditIdx] = useState(0);
   const [activeEntityId, setActiveEntityId] = useState<string | null>(null);
   const [entityCostCardIds, setEntityCostCardIds] = useState<string[]>([]);
+  const [entityBoostCardIds, setEntityBoostCardIds] = useState<string[]>([]);
   const [observation, setObservation] = useState('');
   const [cardQuery, setCardQuery] = useState('');
   const [cardRanks, setCardRanks] = useState<CardRank[]>([]);
   const [lastCardIds, setLastCardIds] = useState<string[]>([]);
+  const [lastCaptions, setLastCaptions] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (visible) {
-      setStep('cards'); setSelectedCards([]); setEditIdx(0); setActiveEntityId(null); setEntityCostCardIds([]); setObservation('');
+      setStep('cards'); setSelectedCards([]); setEditIdx(0); setActiveEntityId(null); setEntityCostCardIds([]); setEntityBoostCardIds([]); setObservation('');
       setCardQuery(''); setCardRanks([]);
       Storage.getLastPlayedCardIds().then(setLastCardIds);
+      Storage.getLastCardCaptions().then(setLastCaptions);
     }
   }, [visible]);
 
   const toggleCard = (c: Card) => {
     setSelectedCards((arr) => arr.some(x => x.id === c.id)
       ? arr.filter(x => x.id !== c.id)
-      : [...arr, { ...c, cost: { ...c.cost }, boost: { ...c.boost }, unlimited: { ...c.unlimited }, entityAttrs: c.entityAttrs ? { ...c.entityAttrs } : undefined, entityUnlimited: c.entityUnlimited ? { ...c.entityUnlimited } : undefined }]);
+      : [...arr, { ...c, caption: lastCaptions[c.id] ?? c.caption, cost: { ...c.cost }, boost: { ...c.boost }, unlimited: { ...c.unlimited }, entityAttrs: c.entityAttrs ? { ...c.entityAttrs } : undefined, entityUnlimited: c.entityUnlimited ? { ...c.entityUnlimited } : undefined }]);
   };
   const updateCard = (patch: Partial<Card>) => {
     setSelectedCards(arr => arr.map((c, i) => i === editIdx ? { ...c, ...patch } : c));
@@ -462,17 +491,22 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
   const entities = selectedCards.filter(c => c.entityType).map(entityFromCard);
   const activeEntity = entities.find(e => e.id === activeEntityId);
   const toggleEntityCostCard = (cardId: string) => setEntityCostCardIds(ids => ids.includes(cardId) ? ids.filter(id => id !== cardId) : [...ids, cardId]);
+  const toggleEntityBoostCard = (cardId: string) => setEntityBoostCardIds(ids => ids.includes(cardId) ? ids.filter(id => id !== cardId) : [...ids, cardId]);
   const entityCostNames = selectedCards.filter(c => entityCostCardIds.includes(c.id)).map(c => c.name).join(', ');
   const ctCostNames = selectedCards.filter(c => !entityCostCardIds.includes(c.id)).map(c => c.name).join(', ');
+  const entityBoostNames = selectedCards.filter(c => entityBoostCardIds.includes(c.id)).map(c => c.name).join(', ');
+  const ctBoostNames = selectedCards.filter(c => !entityBoostCardIds.includes(c.id)).map(c => c.name).join(', ');
 
   const confirmPlay = () => {
     if (!activeCT) { Alert.alert('Atenção', 'O C.T inicial não está definido.'); return; }
     const entityCostIds = activeEntity ? entityCostCardIds : [];
-    const resolved = resolveCombat(activeCT, activeEntity, selectedCards, entityCostIds);
+    const entityBoostIds = activeEntity ? entityBoostCardIds : [];
+    const resolved = resolveCombat(activeCT, activeEntity, selectedCards, entityCostIds, entityBoostIds);
     const targetNote = activeEntity ? `Alvo ativo: ${activeEntity.entityType || 'entidade'} ${activeEntity.name}.` : 'Alvo ativo: O C.T principal.';
     const costNote = activeEntity && entityCostIds.length > 0 ? `Custo na invocação: ${selectedCards.filter(c => entityCostIds.includes(c.id)).map(c => c.name).join(', ')}.` : 'Custos no O C.T principal.';
     const obs = [targetNote, costNote, observation.trim()].filter(Boolean).join(' ');
     Storage.saveLastPlayedCardIds(selectedCards.map(c => c.id));
+    Storage.getLastCardCaptions().then((captions) => Storage.saveLastCardCaptions({ ...captions, ...Object.fromEntries(selectedCards.map(c => [c.id, c.caption])) }));
     onConfirm(selectedCards.map(c => ({ cardSnapshot: c })), activeCT, obs, resolved.finalAttrs, activeEntity, resolved.finalEntityAttrs, resolved.momentaryActions);
   };
 
@@ -570,6 +604,21 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
                     </View>
                     <Text style={styles.obs}>Custo no O C.T: {ctCostNames || 'nenhum'}</Text>
                     <Text style={styles.obs}>Custo na invocação: {entityCostNames || 'nenhum'}</Text>
+                    <Text style={styles.label}>Quais técnicas aumentam a invocação?</Text>
+                    <View style={styles.chipsRow}>
+                      <Chip label="Nenhuma" active={entityBoostCardIds.length === 0} onPress={() => setEntityBoostCardIds([])} testID="play-entity-boost-none" />
+                      {selectedCards.map(card => (
+                        <Chip
+                          key={card.id}
+                          label={card.name}
+                          active={entityBoostCardIds.includes(card.id)}
+                          onPress={() => toggleEntityBoostCard(card.id)}
+                          testID={`play-entity-boost-${card.id}`}
+                        />
+                      ))}
+                    </View>
+                    <Text style={styles.obs}>Aumento no O C.T: {ctBoostNames || 'nenhum'}</Text>
+                    <Text style={styles.obs}>Aumento na invocação: {entityBoostNames || 'nenhum'}</Text>
                   </View>
                 ) : null}
                 <Input
@@ -671,6 +720,10 @@ const styles = StyleSheet.create({
   attrLine: { color: '#fff', fontSize: 12 },
   obs: { color: theme.colors.textSecondary, fontStyle: 'italic', fontSize: 12, marginTop: 4 },
   time: { color: theme.colors.textMuted, fontSize: 10, marginTop: 4, textAlign: 'right' },
+  activeBar: { gap: 8, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, padding: 10, marginBottom: 8 },
+  activeItem: { backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 8, gap: 4 },
+  activeDisable: { alignSelf: 'flex-start', borderRadius: 10, borderWidth: 1, borderColor: theme.colors.borderActive, paddingHorizontal: 10, paddingVertical: 4, marginTop: 4 },
+  activeDisableText: { color: theme.colors.neon, fontSize: 11, fontWeight: '800' },
 
   chatBar: { paddingTop: 8, borderTopWidth: 1, borderColor: theme.colors.border, gap: 8 },
   actionBar: { flexDirection: 'row', gap: 6, paddingTop: 8, borderTopWidth: 1, borderColor: theme.colors.border, flexWrap: 'wrap' },

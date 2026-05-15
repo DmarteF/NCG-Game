@@ -12,6 +12,8 @@ export type UnlimitedFlags = Partial<Record<Attr, boolean>>;
 export type CardEffect = 'none' | 'cost' | 'boost' | 'cost_boost' | 'unlimited';
 export type EntityType = 'invocação' | 'marionete' | 'edo tensei' | 'entidade' | 'criatura';
 export type CardActionType = 'attribute' | 'attack' | 'defense' | 'equipment' | 'mode' | 'entity';
+export type CardType = 'técnica' | 'modo/buff' | 'arma/equipamento' | 'invocação' | 'edo tensei' | 'marionete';
+export type DurationType = 'instantâneo' | 'turnos' | 'manual' | 'destruir' | 'luta';
 
 export type Card = {
   id: string;
@@ -20,9 +22,13 @@ export type Card = {
   image?: string;
   rank: CardRank;
   speed?: number;
+  cardType?: CardType;
   actionType?: CardActionType;
   momentaryAttrs?: AttrValues;
   useCTInfluence?: boolean;
+  durationType?: DurationType;
+  durationTurns?: number;
+  upkeepCost?: AttrValues;
   effect: CardEffect;
   entityType?: EntityType;
   entityAttrs?: Record<Attr, number>;

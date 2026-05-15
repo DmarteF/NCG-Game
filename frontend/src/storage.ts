@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Card, CT, Profile, BattleHistoryItem } from './types';
+import { normalizeCard, normalizeCT } from './normalize';
 
 const K = {
   profile: '@shinobi:profile',
@@ -7,6 +8,7 @@ const K = {
   cts: '@shinobi:cts',
   history: '@shinobi:history',
   lastPlayedCardIds: '@shinobi:lastPlayedCardIds',
+  lastCardCaptions: '@shinobi:lastCardCaptions',
 };
 
 async function getJSON<T>(key: string, fallback: T): Promise<T> {
@@ -29,12 +31,12 @@ export const Storage = {
   saveProfile: (p: Profile) => setJSON(K.profile, p),
 
   // cards
-  getCards: () => getJSON<Card[]>(K.cards, []),
-  saveCards: (cards: Card[]) => setJSON(K.cards, cards),
+  getCards: async () => (await getJSON<Card[]>(K.cards, [])).map(normalizeCard),
+  saveCards: (cards: Card[]) => setJSON(K.cards, cards.map(normalizeCard)),
 
   // cts
-  getCTs: () => getJSON<CT[]>(K.cts, []),
-  saveCTs: (cts: CT[]) => setJSON(K.cts, cts),
+  getCTs: async () => (await getJSON<CT[]>(K.cts, [])).map(normalizeCT),
+  saveCTs: (cts: CT[]) => setJSON(K.cts, cts.map(normalizeCT)),
 
   // history
   getHistory: () => getJSON<BattleHistoryItem[]>(K.history, []),
@@ -47,6 +49,8 @@ export const Storage = {
 
   getLastPlayedCardIds: () => getJSON<string[]>(K.lastPlayedCardIds, []),
   saveLastPlayedCardIds: (ids: string[]) => setJSON(K.lastPlayedCardIds, ids),
+  getLastCardCaptions: () => getJSON<Record<string, string>>(K.lastCardCaptions, {}),
+  saveLastCardCaptions: (captions: Record<string, string>) => setJSON(K.lastCardCaptions, captions),
 };
 
 export function uid() {

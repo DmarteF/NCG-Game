@@ -33,17 +33,14 @@ function entityBase(entity: BattleEntity) {
   return base;
 }
 
-function applyCardToTarget(target: Record<Attr, number | 'ilimitado'>, card: Card) {
+function applyCardToTarget(target: Record<Attr, number | 'ilimitado'>, card: Card, mode: 'cost' | 'boost') {
   for (const attr of ATTRS) {
-    if (card.unlimited[attr]) {
-      target[attr] = 'ilimitado';
-      continue;
-    }
     if (target[attr] === 'ilimitado') continue;
     let value = numeric(target[attr] as number);
-    if (card.cost[attr] != null) value -= numeric(card.cost[attr]);
-    if (card.boost[attr] != null) value += numeric(card.boost[attr]);
+    if (mode === 'cost' && card.cost[attr] != null) value -= numeric(card.cost[attr]);
+    if (mode === 'boost' && card.boost[attr] != null) value += numeric(card.boost[attr]);
     target[attr] = value;
+    if (mode === 'boost' && card.unlimited[attr]) target[attr] = 'ilimitado';
   }
 }
 
@@ -81,26 +78,30 @@ function computeMomentary(card: Card, base: Record<Attr, number | 'ilimitado'>, 
   };
 }
 
-export function resolveCombat(activeCT: CT, activeEntity: BattleEntity | undefined, selectedCards: Card[], entityCostCardIds: string[]): CombatResolution {
+export function resolveCombat(activeCT: CT, activeEntity: BattleEntity | undefined, selectedCards: Card[], entityCostCardIds: string[], entityBoostCardIds: string[] = []): CombatResolution {
   const ctFinal = ctBase(activeCT);
   const entityFinal = activeEntity ? entityBase(activeEntity) : undefined;
   const entityCostSet = new Set(entityCostCardIds);
+  const entityBoostSet = new Set(entityBoostCardIds);
   const momentaryActions: MomentaryAction[] = [];
 
   for (const card of selectedCards) {
-    const targetsEntity = !!entityFinal && entityCostSet.has(card.id);
-    const target = targetsEntity ? entityFinal! : ctFinal;
-    const source = targetsEntity ? 'entity' : 'ct';
+    const costTargetsEntity = !!entityFinal && entityCostSet.has(card.id);
+    const boostTargetsEntity = !!entityFinal && entityBoostSet.has(card.id);
+    const costTarget = costTargetsEntity ? entityFinal! : ctFinal;
+    const boostTarget = boostTargetsEntity ? entityFinal! : ctFinal;
+    const source = costTargetsEntity || boostTargetsEntity ? 'entity' : 'ct';
 
-    const momentary = computeMomentary(card, target, source);
+    const momentary = computeMomentary(card, boostTarget, source);
     if (momentary) momentaryActions.push(momentary);
 
     if (!['attack', 'defense', 'equipment'].includes(card.actionType || 'attribute')) {
-      applyCardToTarget(target, card);
+      applyCardToTarget(costTarget, card, 'cost');
+      applyCardToTarget(boostTarget, card, 'boost');
     } else {
       for (const attr of ATTRS) {
         if (card.cost[attr] != null) {
-          if (target[attr] !== 'ilimitado') target[attr] = numeric(target[attr] as number) - numeric(card.cost[attr]);
+          if (costTarget[attr] !== 'ilimitado') costTarget[attr] = numeric(costTarget[attr] as number) - numeric(card.cost[attr]);
         }
       }
     }

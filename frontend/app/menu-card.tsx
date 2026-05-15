@@ -172,7 +172,7 @@ function CardItem({ card, onEdit, onDelete }: { card: Card; onEdit: () => void; 
       <View style={{ flex: 1, gap: 4 }}>
         <Text style={styles.itemTitle} numberOfLines={1}>{card.name || 'Sem nome'}</Text>
         <Text style={styles.itemSub} numberOfLines={2}>{card.caption || 'Sem legenda'}</Text>
-        <Text style={styles.itemEffects}>Speed: {card.speed ?? 0} • {card.actionType || 'attribute'}</Text>
+        <Text style={styles.itemEffects}>Speed: {card.speed ?? 0} • {card.cardType || 'técnica'}</Text>
         {card.entityType ? <Text style={styles.itemEffects}>{card.entityType}</Text> : null}
         {effects ? <Text style={styles.itemEffects} numberOfLines={2}>{effects}</Text> : null}
       </View>
@@ -234,6 +234,9 @@ function describeCardEffects(card: Card): string {
   if (cost) parts.push(`Custo: ${cost}`);
   if (boost) parts.push(`Aumento: ${boost}`);
   if (unl) parts.push(`Ilimitado: ${unl}`);
+  const upkeep = ATTRS.filter(a => card.upkeepCost?.[a] != null).map(a => `${a}:${formatNumberBR(card.upkeepCost?.[a])}`).join(',');
+  if (card.durationType && card.durationType !== 'instantâneo') parts.push(`Persistente: ${card.durationType}${card.durationType === 'turnos' ? ` (${card.durationTurns || 0})` : ''}`);
+  if (upkeep) parts.push(`Custo/turno: ${upkeep}`);
   return parts.join('  •  ');
 }
 
