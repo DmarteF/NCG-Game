@@ -123,29 +123,28 @@ export default function Battle() {
     });
   };
 
-  const onSendPlay = (played: PlayedCard[], ctSnap: CT, observation: string, finalAttrs: Record<Attr, number | 'ilimitado'>, activeEntity?: BattleEntity, finalEntityAttrs?: Record<Attr, number | 'ilimitado'>, momentaryActions: MomentaryAction[] = []) => {
+  const onSendPlay = (played: PlayedCard[], ctSnap: CT, observation: string, finalAttrs: Record<Attr, number | 'ilimitado'>, keptActiveEffectIds: string[] = [], activeEntity?: BattleEntity, finalEntityAttrs?: Record<Attr, number | 'ilimitado'>, momentaryActions: MomentaryAction[] = []) => {
     const msg: ChatMsg = {
       id: uid(), turn, team: currentTeam, timestamp: Date.now(),
       playedCards: played, ctSnapshot: ctSnap, activeEntitySnapshot: activeEntity, ctObservation: observation, finalAttrs, finalEntityAttrs, momentaryActions,
     };
     setBattleAttrs((attrs) => ({ ...attrs, [currentTeam]: finalAttrs }));
-    registerPersistentEffects(played.map(p => p.cardSnapshot));
+    registerPersistentEffects(played.map(p => p.cardSnapshot), keptActiveEffectIds);
     setMessages((m) => [...m, msg]);
     advanceTurn();
   };
 
-  const registerPersistentEffects = (playedCards: Card[]) => {
+  const registerPersistentEffects = (playedCards: Card[], keptActiveEffectIds: string[]) => {
     const persistent = playedCards.filter(card => card.durationType && card.durationType !== 'instantâneo');
-    if (persistent.length === 0) return;
     setActiveEffects((effects) => {
-      let next = [...effects];
-      for (const card of persistent) {
-        if (next.some(effect => effect.team === currentTeam && effect.card.id === card.id)) continue;
+      let next = effects.filter(effect => effect.team !== currentTeam || keptActiveEffectIds.includes(effect.id));
+      persistent.forEach((card, index) => {
+        if (next.some(effect => effect.team === currentTeam && effect.card.id === card.id)) return;
         if (card.stackBehavior === 'replace') {
           next = next.filter(effect => !(effect.team === currentTeam && effect.card.cardType === card.cardType));
         }
-        next.push({ id: `${card.id}:${Date.now()}`, team: currentTeam, card, remainingTurns: card.durationType === 'turnos' ? card.durationTurns || 0 : undefined });
-      }
+        next.push({ id: `${card.id}:${Date.now()}:${index}`, team: currentTeam, card, remainingTurns: card.durationType === 'turnos' ? card.durationTurns || 0 : undefined });
+      });
       return next;
     });
   };
@@ -306,9 +305,9 @@ export default function Battle() {
         activeCT={currentActiveCT}
         activeEffects={activeEffects.filter(effect => effect.team === currentTeam)}
         onImagePress={setZoomImage}
-        onConfirm={(played, ctSnap, obs, finalAttrs, activeEntity, finalEntityAttrs, momentaryActions) => {
+        onConfirm={(played, ctSnap, obs, finalAttrs, keptActiveEffectIds, activeEntity, finalEntityAttrs, momentaryActions) => {
           setPickerVisible(false);
-          onSendPlay(played, ctSnap, obs, finalAttrs, activeEntity, finalEntityAttrs, momentaryActions);
+          onSendPlay(played, ctSnap, obs, finalAttrs, keptActiveEffectIds, activeEntity, finalEntityAttrs, momentaryActions);
         }}
       />
       <ZoomableImageModal uri={zoomImage} onClose={() => setZoomImage(null)} />
@@ -500,7 +499,7 @@ function entityFromCard(card: Card): BattleEntity {
 function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], onImagePress, onConfirm }:
   { visible: boolean; onClose: () => void; cards: Card[]; activeCT: CT | null; activeEffects?: ActiveEffect[];
     onImagePress: (uri: string) => void;
-    onConfirm: (p: PlayedCard[], ct: CT, obs: string, finalAttrs: Record<Attr, number | 'ilimitado'>, activeEntity?: BattleEntity, finalEntityAttrs?: Record<Attr, number | 'ilimitado'>, momentaryActions?: MomentaryAction[]) => void }) {
+    onConfirm: (p: PlayedCard[], ct: CT, obs: string, finalAttrs: Record<Attr, number | 'ilimitado'>, keptActiveEffectIds: string[], activeEntity?: BattleEntity, finalEntityAttrs?: Record<Attr, number | 'ilimitado'>, momentaryActions?: MomentaryAction[]) => void }) {
 
   const [step, setStep] = useState<'cards' | 'card-edit' | 'target'>('cards');
   const [selectedCards, setSelectedCards] = useState<Card[]>([]);
@@ -513,11 +512,12 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], onIm
   const [cardRanks, setCardRanks] = useState<CardRank[]>([]);
   const [lastCardIds, setLastCardIds] = useState<string[]>([]);
   const [lastCaptions, setLastCaptions] = useState<Record<string, string>>({});
+  const [keepActiveEffectIds, setKeepActiveEffectIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (visible) {
       setStep('cards'); setSelectedCards([]); setEditIdx(0); setActiveEntityId(null); setEntityCostCardIds([]); setEntityBoostCardIds([]); setObservation('');
-      setCardQuery(''); setCardRanks([]);
+      setCardQuery(''); setCardRanks([]); setKeepActiveEffectIds([]);
       Storage.getLastPlayedCardIds().then(setLastCardIds);
       Storage.getLastCardCaptions().then(setLastCaptions);
     }
@@ -545,6 +545,7 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], onIm
     else setStep('target');
   };
   const toggleCardRank = (rank: CardRank) => setCardRanks((ranks) => ranks.includes(rank) ? ranks.filter(r => r !== rank) : [...ranks, rank]);
+  const toggleKeepActiveEffect = (effectId: string) => setKeepActiveEffectIds(ids => ids.includes(effectId) ? ids.filter(id => id !== effectId) : [...ids, effectId]);
   const visibleCards = [...cards].sort((a, b) => {
     const ai = lastCardIds.indexOf(a.id);
     const bi = lastCardIds.indexOf(b.id);
@@ -571,19 +572,27 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], onIm
     if (!activeCT) { Alert.alert('Atenção', 'O C.T inicial não está definido.'); return; }
     const entityCostIds = activeEntity ? entityCostCardIds : [];
     const entityBoostIds = activeEntity ? entityBoostCardIds : [];
-    const activeIds = activeEffects.map(effect => effect.card.id);
-    const replacingEffects = activeEffects.filter(effect => selectedCards.some(card => card.durationType !== 'instantâneo' && card.stackBehavior === 'replace' && card.cardType === effect.card.cardType && card.id !== effect.card.id));
-    const effectiveCT = replacingEffects.length > 0
-      ? { ...activeCT, attrs: replacingEffects.reduce((attrs, effect) => subtractAttrs(attrs, effect.card.boost), activeCT.attrs as BattleAttrs) as Record<Attr, number> }
+    const selectedCardIds = new Set(selectedCards.map(card => card.id));
+    const keptEffects = activeEffects.filter(effect => keepActiveEffectIds.includes(effect.id) || selectedCardIds.has(effect.card.id));
+    const keptEffectIds = keptEffects.map(effect => effect.id);
+    const droppedEffects = activeEffects.filter(effect => !keptEffectIds.includes(effect.id));
+    const replacingEffects = keptEffects.filter(effect => selectedCards.some(card => card.durationType !== 'instantâneo' && card.stackBehavior === 'replace' && card.cardType === effect.card.cardType && card.id !== effect.card.id));
+    const removedEffects = [...droppedEffects, ...replacingEffects].filter((effect, index, arr) => arr.findIndex(item => item.id === effect.id) === index);
+    const activeIds = keptEffects.map(effect => effect.card.id);
+    const effectiveCT = removedEffects.length > 0
+      ? { ...activeCT, attrs: removedEffects.reduce((attrs, effect) => subtractAttrs(attrs, effect.card.boost), activeCT.attrs as BattleAttrs) as Record<Attr, number> }
       : activeCT;
     const cardsForResolve = selectedCards.filter(card => !(card.durationType !== 'instantâneo' && activeIds.includes(card.id)));
     const resolved = resolveCombat(effectiveCT, activeEntity, cardsForResolve, entityCostIds, entityBoostIds);
     const targetNote = activeEntity ? `Alvo ativo: ${activeEntity.entityType || 'entidade'} ${activeEntity.name}.` : 'Alvo ativo: O C.T principal.';
     const costNote = activeEntity && entityCostIds.length > 0 ? `Custo na invocação: ${selectedCards.filter(c => entityCostIds.includes(c.id)).map(c => c.name).join(', ')}.` : 'Custos no O C.T principal.';
-    const obs = [targetNote, costNote, observation.trim()].filter(Boolean).join(' ');
+    const keptNote = keptEffects.length > 0 ? `Continua ativo: ${keptEffects.map(effect => effect.card.name).join(', ')}.` : '';
+    const droppedNote = droppedEffects.length > 0 ? `Desativado: ${droppedEffects.map(effect => effect.card.name).join(', ')}. Bônus removido.` : '';
+    const replacedNote = replacingEffects.length > 0 ? `Substituído: ${replacingEffects.map(effect => effect.card.name).join(', ')}. Bônus antigo removido.` : '';
+    const obs = [targetNote, costNote, keptNote, droppedNote, replacedNote, observation.trim()].filter(Boolean).join(' ');
     Storage.saveLastPlayedCardIds(selectedCards.map(c => c.id));
     Storage.getLastCardCaptions().then((captions) => Storage.saveLastCardCaptions({ ...captions, ...Object.fromEntries(selectedCards.map(c => [c.id, c.caption])) }));
-    onConfirm(selectedCards.map(c => ({ cardSnapshot: c })), activeCT, obs, resolved.finalAttrs, activeEntity, resolved.finalEntityAttrs, resolved.momentaryActions);
+    onConfirm(selectedCards.map(c => ({ cardSnapshot: c })), activeCT, obs, resolved.finalAttrs, keptEffectIds, activeEntity, resolved.finalEntityAttrs, resolved.momentaryActions);
   };
 
   return (
@@ -640,6 +649,37 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], onIm
                   <Text style={styles.cardName}>{ctDisplayName(activeCT)} — Rank {activeCT.rank}</Text>
                   {CT_ATTRS.map(a => <Text key={a} style={styles.attrLine}>{a}: {formatNumberBR(activeCT.attrs[a] ?? 0)}</Text>)}
                 </View>
+                {activeEffects.length > 0 ? (
+                  <View style={styles.activeConfirmBox}>
+                    <Text style={styles.label}>Ativos atuais</Text>
+                    <Text style={styles.obs}>Marque os efeitos que continuam ativos. Os não marcados serão desativados ao enviar.</Text>
+                    {activeEffects.map(effect => {
+                      const selectedAgain = selectedCards.some(card => card.id === effect.card.id);
+                      const kept = keepActiveEffectIds.includes(effect.id) || selectedAgain;
+                      const boost = ATTRS.filter(a => effect.card.boost?.[a] != null).map(a => `${a}:${formatNumberBR(effect.card.boost?.[a])}`).join(' • ');
+                      return (
+                        <View key={effect.id} style={styles.activeConfirmItem}>
+                          <Text style={styles.cardName}>{effect.card.name} • {effect.card.cardType || 'técnica'}</Text>
+                          <Text style={styles.obs}>{kept ? 'Continua ativo' : 'Será desativado'}{boost ? ` • Bônus: ${boost}` : ''}</Text>
+                          <View style={styles.chipsRow}>
+                            <Chip
+                              label={selectedAgain ? 'Mantido por seleção' : 'Manter ativo'}
+                              active={kept}
+                              onPress={() => !selectedAgain && toggleKeepActiveEffect(effect.id)}
+                              testID={`keep-active-${effect.id}`}
+                            />
+                            <Chip
+                              label="Desativar"
+                              active={!kept}
+                              onPress={() => setKeepActiveEffectIds(ids => ids.filter(id => id !== effect.id))}
+                              testID={`drop-active-${effect.id}`}
+                            />
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
                 {entities.length > 0 ? (
                   <View>
                     <Text style={styles.label}>Alvo dos custos/aumentos</Text>
@@ -798,6 +838,8 @@ const styles = StyleSheet.create({
   time: { color: theme.colors.textMuted, fontSize: 10, marginTop: 4, textAlign: 'right' },
   activeBar: { gap: 8, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, padding: 10, marginBottom: 8 },
   activeItem: { backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 8, gap: 4 },
+  activeConfirmBox: { backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 12, borderWidth: 1, borderColor: theme.colors.border, padding: 10, marginTop: 8, marginBottom: 6, gap: 6 },
+  activeConfirmItem: { backgroundColor: 'rgba(0,0,0,0.22)', borderRadius: 10, padding: 8, gap: 4 },
   activeDisable: { alignSelf: 'flex-start', borderRadius: 10, borderWidth: 1, borderColor: theme.colors.borderActive, paddingHorizontal: 10, paddingVertical: 4, marginTop: 4 },
   activeDisableText: { color: theme.colors.neon, fontSize: 11, fontWeight: '800' },
 

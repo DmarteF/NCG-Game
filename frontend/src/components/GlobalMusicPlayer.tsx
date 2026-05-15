@@ -6,6 +6,7 @@ import { usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { musicTracks } from '../musicTracks';
 import { theme } from '../theme';
+import { subscribeGlobalMusic } from '../musicControl';
 
 export default function GlobalMusicPlayer() {
   const pathname = usePathname();
@@ -13,12 +14,28 @@ export default function GlobalMusicPlayer() {
   const soundRef = useRef<Audio.Sound | null>(null);
   const durationRef = useRef(0);
   const barWidthRef = useRef(1);
+  const playingRef = useRef(false);
+  const suspendedWasPlayingRef = useRef(false);
   const [trackIndex, setTrackIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [positionMillis, setPositionMillis] = useState(0);
   const [durationMillis, setDurationMillis] = useState(0);
   const isBattleScreen = pathname.includes('battle');
+
+  useEffect(() => {
+    playingRef.current = playing;
+  }, [playing]);
+
+  useEffect(() => subscribeGlobalMusic((action) => {
+    if (action === 'suspend') {
+      suspendedWasPlayingRef.current = playingRef.current;
+      setPlaying(false);
+      return;
+    }
+    if (suspendedWasPlayingRef.current) setPlaying(true);
+    suspendedWasPlayingRef.current = false;
+  }), []);
 
   useEffect(() => {
     let mounted = true;

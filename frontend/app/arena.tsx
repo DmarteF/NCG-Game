@@ -37,7 +37,7 @@ export default function Arena() {
       return;
     }
     router.push({
-      pathname: '/battle',
+      pathname: isBoss ? '/boss-intro' : '/battle',
       params: { matchType, turnMinutes: isBoss ? '0' : String(turnMinutes) },
     });
   };
