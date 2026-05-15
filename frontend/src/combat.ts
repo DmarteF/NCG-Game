@@ -16,8 +16,9 @@ const emptyFinal = (): Record<Attr, number | 'ilimitado'> => ({
   Hp: 0,
 });
 
-function numeric(value: number | undefined) {
-  return Number.isFinite(value) ? Number(value) : 0;
+export function numeric(value: number | string | undefined) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function ctBase(ct: CT) {
@@ -25,6 +26,19 @@ function ctBase(ct: CT) {
   CT_ATTRS.forEach((attr) => { base[attr] = numeric(ct.attrs[attr]); });
   base.Dur = 0;
   return base;
+}
+
+export function subtractAttrs(base: Record<Attr, number | 'ilimitado'>, values?: AttrValues) {
+  const next = { ...base };
+  for (const attr of ATTRS) {
+    if (next[attr] === 'ilimitado') continue;
+    if (values?.[attr] != null) next[attr] = numeric(next[attr]) - numeric(values[attr]);
+  }
+  return next;
+}
+
+export function applyUpkeep(base: Record<Attr, number | 'ilimitado'>, values?: AttrValues) {
+  return subtractAttrs(base, values);
 }
 
 function entityBase(entity: BattleEntity) {
@@ -90,10 +104,6 @@ export function resolveCombat(activeCT: CT, activeEntity: BattleEntity | undefin
     const boostTargetsEntity = !!entityFinal && entityBoostSet.has(card.id);
     const costTarget = costTargetsEntity ? entityFinal! : ctFinal;
     const boostTarget = boostTargetsEntity ? entityFinal! : ctFinal;
-    const source = costTargetsEntity || boostTargetsEntity ? 'entity' : 'ct';
-
-    const momentary = computeMomentary(card, boostTarget, source);
-    if (momentary) momentaryActions.push(momentary);
 
     if (!['attack', 'defense', 'equipment'].includes(card.actionType || 'attribute')) {
       applyCardToTarget(costTarget, card, 'cost');
@@ -105,6 +115,15 @@ export function resolveCombat(activeCT: CT, activeEntity: BattleEntity | undefin
         }
       }
     }
+  }
+
+  for (const card of selectedCards) {
+    const costTargetsEntity = !!entityFinal && entityCostSet.has(card.id);
+    const boostTargetsEntity = !!entityFinal && entityBoostSet.has(card.id);
+    const boostTarget = boostTargetsEntity ? entityFinal! : ctFinal;
+    const source = costTargetsEntity || boostTargetsEntity ? 'entity' : 'ct';
+    const momentary = computeMomentary(card, boostTarget, source);
+    if (momentary) momentaryActions.push(momentary);
   }
 
   return {

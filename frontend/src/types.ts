@@ -13,7 +13,8 @@ export type CardEffect = 'none' | 'cost' | 'boost' | 'cost_boost' | 'unlimited';
 export type EntityType = 'invocação' | 'marionete' | 'edo tensei' | 'entidade' | 'criatura';
 export type CardActionType = 'attribute' | 'attack' | 'defense' | 'equipment' | 'mode' | 'entity';
 export type CardType = 'técnica' | 'modo/buff' | 'arma/equipamento' | 'invocação' | 'edo tensei' | 'marionete';
-export type DurationType = 'instantâneo' | 'turnos' | 'manual' | 'destruir' | 'luta';
+export type DurationType = 'instantâneo' | 'turnos' | 'persistente';
+export type StackBehavior = 'stack' | 'replace';
 
 export type Card = {
   id: string;
@@ -29,6 +30,7 @@ export type Card = {
   durationType?: DurationType;
   durationTurns?: number;
   upkeepCost?: AttrValues;
+  stackBehavior?: StackBehavior;
   effect: CardEffect;
   entityType?: EntityType;
   entityAttrs?: Record<Attr, number>;

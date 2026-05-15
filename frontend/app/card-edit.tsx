@@ -7,7 +7,7 @@ import Input from '../src/components/Input';
 import ImagePickerField from '../src/components/ImagePickerField';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
-import { Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType, CardType, DurationType } from '../src/types';
+import { Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType, CardType, DurationType, StackBehavior } from '../src/types';
 import { ATTRS, Attr, theme, CARD_RANKS, CardRank } from '../src/theme';
 import { Header } from './profile';
 import { formatNumberBR } from '../src/format';
@@ -28,7 +28,11 @@ const CARD_TYPES: { id: CardType; label: string }[] = [
   { id: 'edo tensei', label: 'Edo tensei' },
   { id: 'marionete', label: 'Marionete' },
 ];
-const DURATIONS: DurationType[] = ['instantâneo', 'turnos', 'manual', 'destruir', 'luta'];
+const DURATIONS: { id: DurationType; label: string }[] = [
+  { id: 'instantâneo', label: 'Instantâneo' },
+  { id: 'turnos', label: 'Por turnos' },
+  { id: 'persistente', label: 'Persistente' },
+];
 const ACTION_TYPES: { id: CardActionType; label: string }[] = [
   { id: 'attribute', label: 'Atributo/buff' },
   { id: 'attack', label: 'Ataque' },
@@ -53,6 +57,7 @@ export default function CardEdit() {
   const [durationType, setDurationType] = useState<DurationType>('instantâneo');
   const [durationTurns, setDurationTurns] = useState(0);
   const [upkeepCost, setUpkeepCost] = useState<AttrValues>({});
+  const [stackBehavior, setStackBehavior] = useState<StackBehavior>('stack');
   const [effect, setEffect] = useState<CardEffect>('none');
   const [entityType, setEntityType] = useState<EntityType | undefined>();
   const [entityAttrs, setEntityAttrs] = useState<Record<Attr, number>>({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
@@ -74,6 +79,7 @@ export default function CardEdit() {
         setDurationType(c.durationType || 'instantâneo');
         setDurationTurns(c.durationTurns || 0);
         setUpkeepCost(c.upkeepCost || {});
+        setStackBehavior(c.stackBehavior || 'stack');
         setEntityAttrs({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0, ...(c.entityAttrs || {}) });
         setEffect(c.effect); setCost(c.cost); setBoost(c.boost); setUnlimited(c.unlimited);
       }
@@ -96,6 +102,7 @@ export default function CardEdit() {
       durationType,
       durationTurns: sanitizeNum(String(durationTurns)),
       upkeepCost: cleanAttrs(upkeepCost),
+      stackBehavior,
       effect,
       entityType: ['invocação', 'edo tensei', 'marionete'].includes(cardType) ? (cardType as EntityType) : entityType,
       entityAttrs: entityType ? entityAttrs : undefined,
@@ -233,13 +240,22 @@ export default function CardEdit() {
       <Text style={styles.label}>Duração persistente</Text>
       <View style={styles.chipsRow}>
         {DURATIONS.map(d => (
-          <Chip key={d} label={d} active={durationType === d} onPress={() => setDurationType(d)} testID={`duration-${d}`} />
+          <Chip key={d.id} label={d.label} active={durationType === d.id} onPress={() => setDurationType(d.id)} testID={`duration-${d.id}`} />
         ))}
       </View>
       {durationType === 'turnos' ? (
         <Input label="Quantidade de turnos" value={String(durationTurns)} onChangeText={(t) => setDurationTurns(sanitizeNum(t))} keyboardType="numeric" testID="duration-turns-input" />
       ) : null}
-      <AttrEditor label="Custo por turno" values={upkeepCost} setValues={setUpkeepCost} keyPrefix="upkeep" />
+      {durationType !== 'instantâneo' ? (
+        <>
+          <Text style={styles.label}>Comportamento de acúmulo</Text>
+          <View style={styles.chipsRow}>
+            <Chip label="Acumula" active={stackBehavior === 'stack'} onPress={() => setStackBehavior('stack')} testID="stack-behavior-stack" />
+            <Chip label="Substitui mesma categoria" active={stackBehavior === 'replace'} onPress={() => setStackBehavior('replace')} testID="stack-behavior-replace" />
+          </View>
+          <AttrEditor label="Custo por turno" values={upkeepCost} setValues={setUpkeepCost} keyPrefix="upkeep" />
+        </>
+      ) : null}
 
       <View style={styles.actions}>
         <Button title="Cancelar" variant="ghost" onPress={() => router.back()} testID="card-cancel-btn" />

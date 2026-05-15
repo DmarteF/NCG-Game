@@ -12,9 +12,14 @@ import { BattleEntity, Card, CT, ChatMsg, MatchType, MomentaryAction, PlayedCard
 import { ATTRS, CT_ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CardRank, Rank } from '../src/theme';
 import { AttrEditor, UnlimitedEditor } from './card-edit';
 import { ctDisplayName, formatNumberBR } from '../src/format';
-import { resolveCombat, visibleFinalAttrs } from '../src/combat';
+import { applyUpkeep, resolveCombat, subtractAttrs, visibleFinalAttrs } from '../src/combat';
 
 type Team = 'team1' | 'team2';
+type BattleAttrs = Record<Attr, number | 'ilimitado'>;
+type ActiveEffect = { id: string; team: Team; card: Card; remainingTurns?: number };
+
+const emptyBattleAttrs = (): BattleAttrs => ({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
+const ctToBattleAttrs = (ct: CT): BattleAttrs => ({ ...emptyBattleAttrs(), ...ct.attrs, Dur: 0 });
 
 export default function Battle() {
   const router = useRouter();
@@ -37,7 +42,8 @@ export default function Battle() {
   const [pickerVisible, setPickerVisible] = useState(false);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
   const [localChatText, setLocalChatText] = useState('');
-  const [disabledActiveIds, setDisabledActiveIds] = useState<string[]>([]);
+  const [activeEffects, setActiveEffects] = useState<ActiveEffect[]>([]);
+  const [battleAttrs, setBattleAttrs] = useState<Record<Team, BattleAttrs>>({ team1: emptyBattleAttrs(), team2: emptyBattleAttrs() });
   const [result, setResult] = useState<string>('');
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -66,16 +72,18 @@ export default function Battle() {
   }, [phase, currentTeam, isBoss, turnSeconds]);
 
   const t2Label = isBoss ? 'Boss' : 'Time 2';
-  const activeCards = messages.flatMap((msg) => msg.playedCards || [])
-    .map((p) => p.cardSnapshot)
-    .filter((card) => card.durationType && card.durationType !== 'instantâneo')
-    .filter((card) => !disabledActiveIds.includes(card.id));
+  const activeCards = activeEffects.filter(effect => effect.team === currentTeam);
+  const currentActiveCT = (currentTeam === 'team1' ? initCT1 : initCT2)
+    ? { ...(currentTeam === 'team1' ? initCT1! : initCT2!), attrs: battleAttrs[currentTeam] as Record<Attr, number> }
+    : null;
 
   const startPresentation = () => {
     if (!initCT1 || !initCT2) {
       Alert.alert('Atenção', 'Cada lado precisa escolher um O C.T inicial.');
       return;
     }
+    setBattleAttrs({ team1: ctToBattleAttrs(initCT1), team2: ctToBattleAttrs(initCT2) });
+    setActiveEffects([]);
     const r1 = RANK_ORDER[initCT1.rank];
     const r2 = RANK_ORDER[initCT2.rank];
     let starter: Team;
@@ -120,8 +128,26 @@ export default function Battle() {
       id: uid(), turn, team: currentTeam, timestamp: Date.now(),
       playedCards: played, ctSnapshot: ctSnap, activeEntitySnapshot: activeEntity, ctObservation: observation, finalAttrs, finalEntityAttrs, momentaryActions,
     };
+    setBattleAttrs((attrs) => ({ ...attrs, [currentTeam]: finalAttrs }));
+    registerPersistentEffects(played.map(p => p.cardSnapshot));
     setMessages((m) => [...m, msg]);
     advanceTurn();
+  };
+
+  const registerPersistentEffects = (playedCards: Card[]) => {
+    const persistent = playedCards.filter(card => card.durationType && card.durationType !== 'instantâneo');
+    if (persistent.length === 0) return;
+    setActiveEffects((effects) => {
+      let next = [...effects];
+      for (const card of persistent) {
+        if (next.some(effect => effect.team === currentTeam && effect.card.id === card.id)) continue;
+        if (card.stackBehavior === 'replace') {
+          next = next.filter(effect => !(effect.team === currentTeam && effect.card.cardType === card.cardType));
+        }
+        next.push({ id: `${card.id}:${Date.now()}`, team: currentTeam, card, remainingTurns: card.durationType === 'turnos' ? card.durationTurns || 0 : undefined });
+      }
+      return next;
+    });
   };
 
   const passTurn = () => {
@@ -145,8 +171,47 @@ export default function Battle() {
     } else {
       setT1Played(newT1); setT2Played(newT2);
     }
-    setCurrentTeam(currentTeam === 'team1' ? 'team2' : 'team1');
+    const nextTeam = currentTeam === 'team1' ? 'team2' : 'team1';
+    applyTurnUpkeep(nextTeam);
+    setCurrentTeam(nextTeam);
     setTimeLeft(turnSeconds);
+  };
+
+  const applyTurnUpkeep = (team: Team) => {
+    setActiveEffects((effects) => {
+      if (!effects.some(effect => effect.team === team)) return effects;
+      let nextAttrs = battleAttrs[team];
+      const logs: string[] = [];
+      const remaining: ActiveEffect[] = [];
+      for (const effect of effects) {
+        if (effect.team !== team) { remaining.push(effect); continue; }
+        const upkeep = ATTRS.filter(attr => effect.card.upkeepCost?.[attr] != null).map(attr => `${attr}:${formatNumberBR(effect.card.upkeepCost?.[attr])}`).join(', ');
+        if (upkeep) {
+          const missing = ATTRS.filter(attr => nextAttrs[attr] !== 'ilimitado' && effect.card.upkeepCost?.[attr] != null && Number(nextAttrs[attr] || 0) < Number(effect.card.upkeepCost?.[attr] || 0));
+          nextAttrs = applyUpkeep(nextAttrs, effect.card.upkeepCost);
+          logs.push(`${effect.card.name}: custo por turno ${upkeep}.`);
+          if (missing.length > 0) logs.push(`${effect.card.name}: recurso insuficiente em ${missing.join(', ')}.`);
+        }
+        const nextRemaining = effect.remainingTurns == null ? undefined : Math.max(0, effect.remainingTurns - 1);
+        if (effect.card.durationType === 'turnos' && nextRemaining === 0) {
+          nextAttrs = subtractAttrs(nextAttrs, effect.card.boost);
+          logs.push(`${effect.card.name} acabou.`);
+        } else {
+          remaining.push({ ...effect, remainingTurns: nextRemaining });
+        }
+      }
+      setBattleAttrs((attrs) => ({ ...attrs, [team]: nextAttrs }));
+      if (logs.length > 0) setMessages((m) => [...m, { id: uid(), turn, team: 'system', text: logs.join(' '), timestamp: Date.now() }]);
+      return remaining;
+    });
+  };
+
+  const disableActive = (effectId: string) => {
+    const effect = activeEffects.find(e => e.id === effectId);
+    if (!effect) return;
+    setBattleAttrs((attrs) => ({ ...attrs, [effect.team]: subtractAttrs(attrs[effect.team], effect.card.boost) }));
+    setActiveEffects((effects) => effects.filter(e => e.id !== effectId));
+    setMessages((m) => [...m, { id: uid(), turn, team: 'system', text: `${effect.card.name} foi desativado.`, timestamp: Date.now() }]);
   };
 
   const declareDeath = () => {
@@ -202,7 +267,7 @@ export default function Battle() {
 
       <FlatList
         ListHeaderComponent={activeCards.length > 0 ? (
-          <ActiveCardsBar cards={activeCards} onDisable={(id) => setDisabledActiveIds((ids) => [...ids, id])} />
+          <ActiveCardsBar effects={activeCards} onDisable={disableActive} />
         ) : null}
         data={messages}
         keyExtractor={(i) => i.id}
@@ -238,7 +303,8 @@ export default function Battle() {
         visible={pickerVisible}
         onClose={() => setPickerVisible(false)}
         cards={cards}
-        activeCT={currentTeam === 'team1' ? initCT1 : initCT2}
+        activeCT={currentActiveCT}
+        activeEffects={activeEffects.filter(effect => effect.team === currentTeam)}
         onImagePress={setZoomImage}
         onConfirm={(played, ctSnap, obs, finalAttrs, activeEntity, finalEntityAttrs, momentaryActions) => {
           setPickerVisible(false);
@@ -250,17 +316,20 @@ export default function Battle() {
   );
 }
 
-function ActiveCardsBar({ cards, onDisable }: { cards: Card[]; onDisable: (id: string) => void }) {
+function ActiveCardsBar({ effects, onDisable }: { effects: ActiveEffect[]; onDisable: (id: string) => void }) {
   return (
     <View style={styles.activeBar}>
       <Text style={styles.label}>Ativos da luta</Text>
-      {cards.map(card => {
+      {effects.map(effect => {
+        const card = effect.card;
         const upkeep = ATTRS.filter(a => card.upkeepCost?.[a] != null).map(a => `${a}:${formatNumberBR(card.upkeepCost?.[a])}`).join(' • ');
+        const boost = ATTRS.filter(a => card.boost?.[a] != null).map(a => `${a}:${formatNumberBR(card.boost?.[a])}`).join(' • ');
         return (
-          <View key={card.id} style={styles.activeItem}>
-            <Text style={styles.cardName}>{card.name} • {card.cardType || 'técnica'}</Text>
-            <Text style={styles.obs}>Duração: {card.durationType}{card.durationType === 'turnos' ? ` (${card.durationTurns || 0} turnos)` : ''}{upkeep ? ` • Custo/turno: ${upkeep}` : ''}</Text>
-            <Pressable onPress={() => onDisable(card.id)} style={styles.activeDisable}><Text style={styles.activeDisableText}>Desativar</Text></Pressable>
+          <View key={effect.id} style={styles.activeItem}>
+            <Text style={styles.cardName}>{card.name} • {card.cardType || 'técnica'} • {card.stackBehavior === 'replace' ? 'substitui' : 'acumula'}</Text>
+            <Text style={styles.obs}>Duração: {card.durationType === 'turnos' ? `por turnos (${effect.remainingTurns || 0})` : 'persistente'}{upkeep ? ` • Custo/turno: ${upkeep}` : ''}</Text>
+            {boost ? <Text style={styles.obs}>Bônus ativo: {boost}</Text> : null}
+            <Pressable onPress={() => onDisable(effect.id)} style={styles.activeDisable}><Text style={styles.activeDisableText}>Desativar</Text></Pressable>
           </View>
         );
       })}
@@ -427,8 +496,8 @@ function entityFromCard(card: Card): BattleEntity {
 }
 
 // ====== Play Modal ======
-function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm }:
-  { visible: boolean; onClose: () => void; cards: Card[]; activeCT: CT | null;
+function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], onImagePress, onConfirm }:
+  { visible: boolean; onClose: () => void; cards: Card[]; activeCT: CT | null; activeEffects?: ActiveEffect[];
     onImagePress: (uri: string) => void;
     onConfirm: (p: PlayedCard[], ct: CT, obs: string, finalAttrs: Record<Attr, number | 'ilimitado'>, activeEntity?: BattleEntity, finalEntityAttrs?: Record<Attr, number | 'ilimitado'>, momentaryActions?: MomentaryAction[]) => void }) {
 
@@ -501,7 +570,13 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
     if (!activeCT) { Alert.alert('Atenção', 'O C.T inicial não está definido.'); return; }
     const entityCostIds = activeEntity ? entityCostCardIds : [];
     const entityBoostIds = activeEntity ? entityBoostCardIds : [];
-    const resolved = resolveCombat(activeCT, activeEntity, selectedCards, entityCostIds, entityBoostIds);
+    const activeIds = activeEffects.map(effect => effect.card.id);
+    const replacingEffects = activeEffects.filter(effect => selectedCards.some(card => card.durationType !== 'instantâneo' && card.stackBehavior === 'replace' && card.cardType === effect.card.cardType && card.id !== effect.card.id));
+    const effectiveCT = replacingEffects.length > 0
+      ? { ...activeCT, attrs: replacingEffects.reduce((attrs, effect) => subtractAttrs(attrs, effect.card.boost), activeCT.attrs as BattleAttrs) as Record<Attr, number> }
+      : activeCT;
+    const cardsForResolve = selectedCards.filter(card => !(card.durationType !== 'instantâneo' && activeIds.includes(card.id)));
+    const resolved = resolveCombat(effectiveCT, activeEntity, cardsForResolve, entityCostIds, entityBoostIds);
     const targetNote = activeEntity ? `Alvo ativo: ${activeEntity.entityType || 'entidade'} ${activeEntity.name}.` : 'Alvo ativo: O C.T principal.';
     const costNote = activeEntity && entityCostIds.length > 0 ? `Custo na invocação: ${selectedCards.filter(c => entityCostIds.includes(c.id)).map(c => c.name).join(', ')}.` : 'Custos no O C.T principal.';
     const obs = [targetNote, costNote, observation.trim()].filter(Boolean).join(' ');

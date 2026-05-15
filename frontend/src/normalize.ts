@@ -1,11 +1,12 @@
 import { ATTRS, Attr } from './theme';
-import { AttrValues, Card, CardActionType, CardEffect, CardType, CT, DurationType, EntityType, UnlimitedFlags } from './types';
+import { AttrValues, Card, CardActionType, CardEffect, CardType, CT, DurationType, EntityType, StackBehavior, UnlimitedFlags } from './types';
 
 const emptyAttrs = (): Record<Attr, number> => ({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
 const validEntityTypes: EntityType[] = ['invocação', 'marionete', 'edo tensei'];
 const validCardTypes: CardType[] = ['técnica', 'modo/buff', 'arma/equipamento', 'invocação', 'edo tensei', 'marionete'];
 const validActionTypes: CardActionType[] = ['attribute', 'attack', 'defense', 'equipment', 'mode', 'entity'];
-const validDurationTypes: DurationType[] = ['instantâneo', 'turnos', 'manual', 'destruir', 'luta'];
+const validDurationTypes: DurationType[] = ['instantâneo', 'turnos', 'persistente'];
+const validStack: StackBehavior[] = ['stack', 'replace'];
 
 function cleanAttrValues(values?: AttrValues): AttrValues {
   const out: AttrValues = {};
@@ -75,9 +76,10 @@ export function normalizeCard(card: Partial<Card>): Card {
     actionType,
     momentaryAttrs: cleanAttrValues(card.momentaryAttrs),
     useCTInfluence: !!card.useCTInfluence,
-    durationType: card.durationType && validDurationTypes.includes(card.durationType) ? card.durationType : 'instantâneo',
+    durationType: card.durationType && validDurationTypes.includes(card.durationType) ? card.durationType : card.durationType && ['manual', 'destruir', 'luta'].includes(card.durationType) ? 'persistente' : 'instantâneo',
     durationTurns: Math.max(0, Math.trunc(Number(card.durationTurns || 0))),
     upkeepCost: cleanAttrValues(card.upkeepCost),
+    stackBehavior: card.stackBehavior && validStack.includes(card.stackBehavior) ? card.stackBehavior : 'stack',
     effect: inferEffect(card),
     entityType,
     entityAttrs: entityType ? entityAttrs : undefined,
