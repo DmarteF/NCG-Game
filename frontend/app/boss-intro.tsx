@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ImageBackground, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Audio } from 'expo-av';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Button from '../src/components/Button';
@@ -11,6 +11,7 @@ import { BossDifficulty, MatchType } from '../src/types';
 const scenes = [
   {
     title: 'O Abismo Vermelho',
+    image: require('../assets/boss/Cena1.jpeg'),
     text: [
       'Muito antes das grandes vilas shinobi, existia uma dimensão esquecida entre o chakra, o espaço e o vazio.',
       'Esse lugar era conhecido como Abismo Vermelho.',
@@ -20,6 +21,7 @@ const scenes = [
   },
   {
     title: 'O Soberano do Vazio',
+    image: require('../assets/boss/Cena2.jpeg'),
     text: [
       'Kael’Zor não se contentou em reinar apenas sobre o Abismo.',
       'Ao descobrir outros mundos, passou a atravessar dimensões, abrindo fendas rubras por onde sua energia invadia a realidade.',
@@ -29,6 +31,7 @@ const scenes = [
   },
   {
     title: 'O Grande Selo',
+    image: require('../assets/boss/Cena3.jpeg'),
     text: [
       'Para impedir sua conquista, antigos mestres do espaço-tempo se uniram contra Kael’Zor.',
       'Eles perceberam que não poderiam destruí-lo completamente.',
@@ -39,6 +42,7 @@ const scenes = [
   },
   {
     title: 'O Despertar',
+    image: require('../assets/boss/Cena4.jpeg'),
     text: [
       'Séculos depois, o mundo shinobi começou a rasgar o espaço com batalhas, técnicas proibidas e colisões de chakra cada vez mais intensas.',
       'Uma dessas rachaduras alcançou a prisão de Kael’Zor.',
@@ -97,15 +101,17 @@ export default function BossIntro() {
 
   return (
     <Screen testID="boss-intro-screen">
-      <View style={styles.hero}>
-        <View style={styles.scenePlate}>
-          <Text style={styles.sceneNumber}>{sceneIndex + 1}</Text>
-          <Text style={styles.sceneCount}>/4</Text>
+      <ImageBackground source={scene.image} resizeMode="cover" style={styles.hero} imageStyle={styles.heroImage}>
+        <View style={styles.heroShade}>
+          <View style={styles.scenePlate}>
+            <Text style={styles.sceneNumber}>{sceneIndex + 1}</Text>
+            <Text style={styles.sceneCount}>/4</Text>
+          </View>
+          <Text style={styles.eyebrow}>{scene.title}</Text>
+          <Text style={styles.title}>Kael’Zor</Text>
+          <Text style={styles.subtitle}>Fragmento Selado do Vazio</Text>
         </View>
-        <Text style={styles.eyebrow}>{scene.title}</Text>
-        <Text style={styles.title}>Kael’Zor</Text>
-        <Text style={styles.subtitle}>Fragmento Selado do Vazio</Text>
-      </View>
+      </ImageBackground>
 
       <ScrollView style={styles.storyBox} contentContainerStyle={styles.storyContent}>
         {scene.text.map((paragraph, index) => <Text key={index} style={[styles.story, index === scene.text.length - 1 && sceneIndex === 3 && styles.finalLine]}>{paragraph}</Text>)}
@@ -127,15 +133,20 @@ export default function BossIntro() {
 
 const styles = StyleSheet.create({
   hero: {
-    minHeight: 190,
-    justifyContent: 'flex-end',
+    minHeight: 220,
     borderRadius: 18,
-    padding: 18,
     marginBottom: 16,
     overflow: 'hidden',
     backgroundColor: '#130205',
     borderWidth: 1,
     borderColor: 'rgba(255,59,0,0.45)',
+  },
+  heroImage: { borderRadius: 18 },
+  heroShade: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    padding: 18,
+    backgroundColor: 'rgba(8,0,2,0.38)',
   },
   scenePlate: { position: 'absolute', top: 14, right: 14, flexDirection: 'row', alignItems: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: theme.colors.border },
   sceneNumber: { color: '#fff', fontSize: 24, fontWeight: '900' },
