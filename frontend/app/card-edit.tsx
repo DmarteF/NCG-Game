@@ -7,7 +7,7 @@ import Input from '../src/components/Input';
 import ImagePickerField from '../src/components/ImagePickerField';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
-import { Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType, CardType, DurationType, StackBehavior } from '../src/types';
+import { Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType, CardType, DurationType, StackBehavior, CardSpeed } from '../src/types';
 import { ATTRS, Attr, theme, CARD_RANKS, CardRank } from '../src/theme';
 import { Header } from './profile';
 import { formatNumberBR } from '../src/format';
@@ -41,6 +41,19 @@ const ACTION_TYPES: { id: CardActionType; label: string }[] = [
   { id: 'mode', label: 'Modo' },
   { id: 'entity', label: 'Invocação' },
 ];
+const SPEED_OPTIONS: { value: CardSpeed | undefined; label: string }[] = [
+  { value: undefined, label: 'Sem Speed' },
+  { value: 0, label: 'Speed 0' },
+  { value: 1, label: 'Speed 1' },
+  { value: 2, label: 'Speed 2' },
+  { value: 3, label: 'Speed 3' },
+  { value: 4, label: 'Speed 4' },
+  { value: 5, label: 'Speed 5' },
+  { value: 6, label: 'Speed 6' },
+  { value: 7, label: 'Speed 7' },
+  { value: 8, label: 'Speed 8' },
+  { value: 'instant', label: 'Instantânea' },
+];
 
 export default function CardEdit() {
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -49,7 +62,7 @@ export default function CardEdit() {
   const [caption, setCaption] = useState('');
   const [image, setImage] = useState<string | undefined>();
   const [rank, setRank] = useState<CardRank>('E');
-  const [speed, setSpeed] = useState(0);
+  const [speed, setSpeed] = useState<CardSpeed | undefined>();
   const [cardType, setCardType] = useState<CardType>('técnica');
   const [actionType, setActionType] = useState<CardActionType>('attribute');
   const [momentaryAttrs, setMomentaryAttrs] = useState<AttrValues>({});
@@ -71,7 +84,7 @@ export default function CardEdit() {
       const c = cards.find(x => x.id === id);
       if (c) {
         setName(c.name); setCaption(c.caption); setImage(c.image);
-        setRank(c.rank || 'E'); setSpeed(clampSpeed(c.speed)); setEntityType(c.entityType);
+        setRank(c.rank || 'E'); setSpeed(normalizeSpeed(c.speed)); setEntityType(c.entityType);
         setCardType(c.cardType || (c.entityType ? c.entityType === 'edo tensei' ? 'edo tensei' : c.entityType === 'marionete' ? 'marionete' : 'invocação' : 'técnica'));
         setActionType(c.actionType || (c.entityType ? 'entity' : 'attribute'));
         setMomentaryAttrs(c.momentaryAttrs || {});
@@ -94,7 +107,7 @@ export default function CardEdit() {
       caption: caption.trim(),
       image,
       rank,
-      speed: clampSpeed(speed),
+      speed: normalizeSpeed(speed),
       cardType,
       actionType,
       momentaryAttrs: cleanAttrs(momentaryAttrs),
@@ -137,14 +150,18 @@ export default function CardEdit() {
         ))}
       </View>
 
-      <Input
-        label="Speed (0 a 8)"
-        value={String(speed)}
-        onChangeText={(t) => setSpeed(clampSpeed(sanitizeNum(t)))}
-        keyboardType="numeric"
-        placeholder="0"
-        testID="card-speed-input"
-      />
+      <Text style={styles.label}>Speed</Text>
+      <View style={styles.chipsRow}>
+        {SPEED_OPTIONS.map(option => (
+          <Chip
+            key={String(option.value ?? 'none')}
+            label={option.label}
+            active={speed === option.value}
+            onPress={() => setSpeed(option.value)}
+            testID={`card-speed-${String(option.value ?? 'none')}`}
+          />
+        ))}
+      </View>
 
       <Text style={styles.label}>Categoria RPG</Text>
       <View style={styles.chipsRow}>
@@ -314,8 +331,11 @@ export function sanitizeNum(t: string): number {
   return n;
 }
 
-export function clampSpeed(value: number | undefined): number {
-  const n = Number.isFinite(value) ? Number(value) : 0;
+export function normalizeSpeed(value: CardSpeed | undefined): CardSpeed | undefined {
+  if (value == null) return undefined;
+  if (value === 'instant') return 'instant';
+  const n = Number(value);
+  if (!Number.isFinite(n)) return undefined;
   return Math.max(0, Math.min(8, Math.trunc(n)));
 }
 

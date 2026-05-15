@@ -1,5 +1,5 @@
 import { ATTRS, Attr } from './theme';
-import { AttrValues, Card, CardActionType, CardEffect, CardType, CT, DurationType, EntityType, StackBehavior, UnlimitedFlags } from './types';
+import { AttrValues, Card, CardActionType, CardEffect, CardSpeed, CardType, CT, DurationType, EntityType, StackBehavior, UnlimitedFlags } from './types';
 
 const emptyAttrs = (): Record<Attr, number> => ({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
 const validEntityTypes: EntityType[] = ['invocação', 'marionete', 'edo tensei'];
@@ -53,6 +53,14 @@ function inferEffect(card: Partial<Card>): CardEffect {
   return 'none';
 }
 
+function normalizeSpeed(speed: Partial<Card>['speed']): CardSpeed | undefined {
+  if (speed == null) return undefined;
+  if (speed === 'instant') return 'instant';
+  const n = Number(speed);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.max(0, Math.min(8, Math.trunc(n)));
+}
+
 export function normalizeCard(card: Partial<Card>): Card {
   const entityType = normalizeEntityType(card.entityType);
   const cardType = inferCardType({ ...card, entityType });
@@ -71,7 +79,7 @@ export function normalizeCard(card: Partial<Card>): Card {
     caption: card.caption || '',
     image: card.image,
     rank: card.rank || 'E',
-    speed: Math.max(0, Math.min(8, Math.trunc(Number(card.speed || 0)))),
+    speed: normalizeSpeed(card.speed),
     cardType,
     actionType,
     momentaryAttrs: cleanAttrValues(card.momentaryAttrs),

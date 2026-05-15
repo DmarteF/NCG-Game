@@ -1,4 +1,4 @@
-import { CT } from './types';
+import { CardSpeed, CT } from './types';
 
 export function formatNumberBR(value: number | string | null | undefined) {
   if (value === 'ilimitado') return value;
@@ -11,4 +11,10 @@ export function ctDisplayName(ct: Pick<CT, 'name' | 'rank'> | null | undefined) 
   if (!ct) return 'O C.T';
   const name = ct.name?.trim();
   return name || `O C.T Rank ${ct.rank}`;
+}
+
+export function formatSpeed(speed: CardSpeed | null | undefined) {
+  if (speed === 'instant') return 'Speed: Instantânea';
+  if (typeof speed === 'number' && Number.isFinite(speed)) return `Speed: ${speed}`;
+  return '';
 }

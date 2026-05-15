@@ -15,6 +15,7 @@ export type CardActionType = 'attribute' | 'attack' | 'defense' | 'equipment' | 
 export type CardType = 'técnica' | 'modo/buff' | 'arma/equipamento' | 'invocação' | 'edo tensei' | 'marionete';
 export type DurationType = 'instantâneo' | 'turnos' | 'persistente';
 export type StackBehavior = 'stack' | 'replace';
+export type CardSpeed = number | 'instant';
 
 export type Card = {
   id: string;
@@ -22,7 +23,7 @@ export type Card = {
   caption: string;
   image?: string;
   rank: CardRank;
-  speed?: number;
+  speed?: CardSpeed;
   cardType?: CardType;
   actionType?: CardActionType;
   momentaryAttrs?: AttrValues;

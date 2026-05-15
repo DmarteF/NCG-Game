@@ -10,7 +10,7 @@ import { Storage } from '../src/storage';
 import { Card, CT } from '../src/types';
 import { theme, ATTRS, CT_ATTRS, CARD_RANKS, CT_RANKS, CardRank, Rank } from '../src/theme';
 import { Header } from './profile';
-import { ctDisplayName, formatNumberBR } from '../src/format';
+import { ctDisplayName, formatNumberBR, formatSpeed } from '../src/format';
 
 type Tab = 'cards' | 'ct';
 
@@ -163,6 +163,7 @@ function Empty({ text }: { text: string }) {
 
 function CardItem({ card, onEdit, onDelete }: { card: Card; onEdit: () => void; onDelete: () => void }) {
   const effects = describeCardEffects(card);
+  const speed = formatSpeed(card.speed);
   return (
     <View style={styles.item} testID={`card-item-${card.id}`}>
       <View style={styles.thumbWrap}>
@@ -172,7 +173,7 @@ function CardItem({ card, onEdit, onDelete }: { card: Card; onEdit: () => void; 
       <View style={{ flex: 1, gap: 4 }}>
         <Text style={styles.itemTitle} numberOfLines={1}>{card.name || 'Sem nome'}</Text>
         <Text style={styles.itemSub} numberOfLines={2}>{card.caption || 'Sem legenda'}</Text>
-        <Text style={styles.itemEffects}>Speed: {card.speed ?? 0} • {card.cardType || 'técnica'}</Text>
+        <Text style={styles.itemEffects}>{[speed, card.cardType || 'técnica'].filter(Boolean).join(' • ')}</Text>
         {card.entityType ? <Text style={styles.itemEffects}>{card.entityType}</Text> : null}
         {effects ? <Text style={styles.itemEffects} numberOfLines={2}>{effects}</Text> : null}
       </View>

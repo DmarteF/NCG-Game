@@ -11,7 +11,7 @@ import { Storage, uid } from '../src/storage';
 import { BattleEntity, Card, CT, ChatMsg, MatchType, MomentaryAction, PlayedCard } from '../src/types';
 import { ATTRS, CT_ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CardRank, Rank } from '../src/theme';
 import { AttrEditor, UnlimitedEditor } from './card-edit';
-import { ctDisplayName, formatNumberBR } from '../src/format';
+import { ctDisplayName, formatNumberBR, formatSpeed } from '../src/format';
 import { applyUpkeep, resolveCombat, subtractAttrs, visibleFinalAttrs } from '../src/combat';
 
 type Team = 'team1' | 'team2';
@@ -458,7 +458,8 @@ function renderEffectLines(c: Card, action?: MomentaryAction) {
   const upkeep = ATTRS.filter(a => c.upkeepCost?.[a] != null).map(a => `${a}: ${formatNumberBR(c.upkeepCost?.[a])}`).join(', ');
   if (c.durationType && c.durationType !== 'instantâneo') lines.push(`Persistente: ${c.durationType}${c.durationType === 'turnos' ? ` (${c.durationTurns || 0} turnos)` : ''}`);
   if (upkeep) lines.push(`Custo por turno: ${upkeep}`);
-  lines.push(`Speed: ${c.speed ?? 0}`);
+  const speed = formatSpeed(c.speed);
+  if (speed) lines.push(speed);
   return lines.map((l, i) => <Text key={i} style={styles.fxLine}>{l}</Text>);
 }
 
@@ -553,7 +554,7 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], onIm
     return ai - bi;
   }).filter((c) => {
     const q = cardQuery.trim().toLowerCase();
-    const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''} ${c.speed ?? 0}`.toLowerCase().includes(q);
+    const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''} ${formatSpeed(c.speed)}`.toLowerCase().includes(q);
     const rankOk = cardRanks.length === 0 || cardRanks.includes(c.rank || 'E');
     return queryOk && rankOk && canCTUseCard(activeCT, c);
   });
@@ -614,7 +615,7 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], onIm
                         style={({ pressed }) => [styles.pickItem, active && styles.pickItemActive, { opacity: pressed ? 0.85 : 1 }]}>
                         <ZoomableThumb uri={c.image} onPress={onImagePress} />
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.pickName}>{c.name} — {c.rank || 'E'} • Speed: {c.speed ?? 0}</Text>
+                          <Text style={styles.pickName}>{[`${c.name} — ${c.rank || 'E'}`, formatSpeed(c.speed)].filter(Boolean).join(' • ')}</Text>
                           <Text style={styles.pickSub} numberOfLines={1}>{c.caption}</Text>
                         </View>
                         {active && <Ionicons name="checkmark-circle" size={20} color={theme.colors.primary} />}
@@ -726,7 +727,7 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
     <View>
       <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 10 }}>
         {card.image ? <Image source={{ uri: card.image }} style={[styles.cardThumb, { width: 50, height: 50 }]} /> : null}
-        <Text style={styles.pickName}>{card.name} — {card.rank || 'E'} • Speed: {card.speed ?? 0}</Text>
+        <Text style={styles.pickName}>{[`${card.name} — ${card.rank || 'E'}`, formatSpeed(card.speed)].filter(Boolean).join(' • ')}</Text>
       </View>
       <Input label="Legenda (desta jogada)" value={card.caption} onChangeText={(t) => onChange({ caption: t })} multiline numberOfLines={3} style={{ minHeight: 70, textAlignVertical: 'top' }} testID="play-card-caption" />
       {showMomentary ? (
