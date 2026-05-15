@@ -172,7 +172,7 @@ function CardItem({ card, onEdit, onDelete }: { card: Card; onEdit: () => void; 
       <View style={{ flex: 1, gap: 4 }}>
         <Text style={styles.itemTitle} numberOfLines={1}>{card.name || 'Sem nome'}</Text>
         <Text style={styles.itemSub} numberOfLines={2}>{card.caption || 'Sem legenda'}</Text>
-        <Text style={styles.itemEffects}>Speed: {card.speed ?? 0}</Text>
+        <Text style={styles.itemEffects}>Speed: {card.speed ?? 0} • {card.actionType || 'attribute'}</Text>
         {card.entityType ? <Text style={styles.itemEffects}>{card.entityType}</Text> : null}
         {effects ? <Text style={styles.itemEffects} numberOfLines={2}>{effects}</Text> : null}
       </View>
@@ -225,7 +225,9 @@ function canCTUseCard(ct: CT | undefined, card: Card) {
 
 function describeCardEffects(card: Card): string {
   const parts: string[] = [];
-  if (card.effect === 'none') return '';
+  const momentary = ATTRS.filter(a => card.momentaryAttrs?.[a] != null).map(a => `${a}:${formatNumberBR(card.momentaryAttrs?.[a])}`).join(',');
+  if (momentary) parts.push(`Ação: ${momentary}${card.useCTInfluence ? ' + atributo base' : ''}`);
+  if (card.effect === 'none') return parts.join('  •  ');
   const cost = ATTRS.filter(a => card.cost[a] != null).map(a => `${a}:${formatNumberBR(card.cost[a])}`).join(',');
   const boost = ATTRS.filter(a => card.boost[a] != null).map(a => `${a}:${formatNumberBR(card.boost[a])}`).join(',');
   const unl = ATTRS.filter(a => card.unlimited[a]).map(a => `${a}:∞`).join(',');

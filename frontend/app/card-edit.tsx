@@ -7,7 +7,7 @@ import Input from '../src/components/Input';
 import ImagePickerField from '../src/components/ImagePickerField';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
-import { Card, CardEffect, AttrValues, UnlimitedFlags, EntityType } from '../src/types';
+import { Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType } from '../src/types';
 import { ATTRS, Attr, theme, CARD_RANKS, CardRank } from '../src/theme';
 import { Header } from './profile';
 import { formatNumberBR } from '../src/format';
@@ -20,6 +20,14 @@ const EFFECTS: { id: CardEffect; label: string }[] = [
   { id: 'unlimited', label: 'Atributo ilimitado' },
 ];
 const ENTITY_TYPES: EntityType[] = ['invocação', 'marionete', 'edo tensei', 'entidade', 'criatura'];
+const ACTION_TYPES: { id: CardActionType; label: string }[] = [
+  { id: 'attribute', label: 'Atributo/buff' },
+  { id: 'attack', label: 'Ataque' },
+  { id: 'defense', label: 'Defesa' },
+  { id: 'equipment', label: 'Arma/equip.' },
+  { id: 'mode', label: 'Modo' },
+  { id: 'entity', label: 'Invocação' },
+];
 
 export default function CardEdit() {
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -29,6 +37,9 @@ export default function CardEdit() {
   const [image, setImage] = useState<string | undefined>();
   const [rank, setRank] = useState<CardRank>('E');
   const [speed, setSpeed] = useState(0);
+  const [actionType, setActionType] = useState<CardActionType>('attribute');
+  const [momentaryAttrs, setMomentaryAttrs] = useState<AttrValues>({});
+  const [useCTInfluence, setUseCTInfluence] = useState(false);
   const [effect, setEffect] = useState<CardEffect>('none');
   const [entityType, setEntityType] = useState<EntityType | undefined>();
   const [entityAttrs, setEntityAttrs] = useState<Record<Attr, number>>({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
@@ -43,6 +54,9 @@ export default function CardEdit() {
       if (c) {
         setName(c.name); setCaption(c.caption); setImage(c.image);
         setRank(c.rank || 'E'); setSpeed(clampSpeed(c.speed)); setEntityType(c.entityType);
+        setActionType(c.actionType || (c.entityType ? 'entity' : 'attribute'));
+        setMomentaryAttrs(c.momentaryAttrs || {});
+        setUseCTInfluence(!!c.useCTInfluence);
         setEntityAttrs({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0, ...(c.entityAttrs || {}) });
         setEffect(c.effect); setCost(c.cost); setBoost(c.boost); setUnlimited(c.unlimited);
       }
@@ -58,6 +72,9 @@ export default function CardEdit() {
       image,
       rank,
       speed: clampSpeed(speed),
+      actionType,
+      momentaryAttrs: cleanAttrs(momentaryAttrs),
+      useCTInfluence,
       effect,
       entityType,
       entityAttrs: entityType ? entityAttrs : undefined,
@@ -75,6 +92,7 @@ export default function CardEdit() {
   const showCost = effect === 'cost' || effect === 'cost_boost';
   const showBoost = effect === 'boost' || effect === 'cost_boost';
   const showUnl = effect === 'unlimited';
+  const showMomentary = actionType === 'attack' || actionType === 'defense' || actionType === 'equipment';
 
   return (
     <Screen testID="card-edit-screen">
@@ -102,6 +120,40 @@ export default function CardEdit() {
         placeholder="0"
         testID="card-speed-input"
       />
+
+      <Text style={styles.label}>Tipo de uso</Text>
+      <View style={styles.chipsRow}>
+        {ACTION_TYPES.map(a => (
+          <Chip
+            key={a.id}
+            label={a.label}
+            active={actionType === a.id}
+            onPress={() => {
+              setActionType(a.id);
+              if (a.id === 'entity') setEntityType(entityType || 'invocação');
+              if (a.id !== 'entity' && entityType && actionType === 'entity') setEntityType(undefined);
+            }}
+            testID={`card-action-${a.id}`}
+          />
+        ))}
+      </View>
+
+      {showMomentary ? (
+        <View>
+          <AttrEditor
+            label={actionType === 'defense' ? 'Defesa momentânea' : actionType === 'equipment' ? 'Atk/Def da arma' : 'Ataque momentâneo'}
+            values={momentaryAttrs}
+            setValues={setMomentaryAttrs}
+            keyPrefix="momentary"
+            allowedAttrs={actionType === 'attack' ? ['Atk'] : actionType === 'defense' ? ['Def'] : ['Atk', 'Def']}
+          />
+          <Text style={styles.label}>Usar atributo do O C.T/alvo no cálculo?</Text>
+          <View style={styles.chipsRow}>
+            <Chip label="Não" active={!useCTInfluence} onPress={() => setUseCTInfluence(false)} testID="ct-influence-no" />
+            <Chip label="Sim" active={useCTInfluence} onPress={() => setUseCTInfluence(true)} testID="ct-influence-yes" />
+          </View>
+        </View>
+      ) : null}
 
       <Text style={styles.label}>Entidade invocada</Text>
       <View style={styles.chipsRow}>
@@ -147,7 +199,7 @@ export default function CardEdit() {
   );
 }
 
-export function AttrEditor({ label, values, setValues, keyPrefix }: { label: string; values: AttrValues; setValues: (v: AttrValues) => void; keyPrefix: string }) {
+export function AttrEditor({ label, values, setValues, keyPrefix, allowedAttrs = ATTRS }: { label: string; values: AttrValues; setValues: (v: AttrValues) => void; keyPrefix: string; allowedAttrs?: readonly Attr[] }) {
   const toggle = (a: Attr) => {
     const next = { ...values };
     if (a in next) delete next[a];
@@ -158,11 +210,11 @@ export function AttrEditor({ label, values, setValues, keyPrefix }: { label: str
     <View style={{ marginBottom: 8 }}>
       <Text style={styles.label}>{label}</Text>
       <View style={styles.chipsRow}>
-        {ATTRS.map(a => (
+        {allowedAttrs.map(a => (
           <Chip key={a} label={a} active={a in values} onPress={() => toggle(a)} testID={`${keyPrefix}-toggle-${a}`} />
         ))}
       </View>
-      {ATTRS.filter(a => a in values).map(a => (
+      {allowedAttrs.filter(a => a in values).map(a => (
         <Input
           key={a}
           label={`${label} ${a} (${formatNumberBR(values[a] ?? 0)})`}

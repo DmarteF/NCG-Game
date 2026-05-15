@@ -7,10 +7,11 @@ import Button from '../src/components/Button';
 import Input from '../src/components/Input';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
-import { BattleEntity, Card, CT, ChatMsg, MatchType, PlayedCard } from '../src/types';
+import { BattleEntity, Card, CT, ChatMsg, MatchType, MomentaryAction, PlayedCard } from '../src/types';
 import { ATTRS, CT_ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CardRank, Rank } from '../src/theme';
-import { AttrEditor, UnlimitedEditor, sanitizeNum } from './card-edit';
+import { AttrEditor, UnlimitedEditor } from './card-edit';
 import { ctDisplayName, formatNumberBR } from '../src/format';
+import { resolveCombat, visibleFinalAttrs } from '../src/combat';
 
 type Team = 'team1' | 'team2';
 
@@ -107,10 +108,10 @@ export default function Battle() {
     });
   };
 
-  const onSendPlay = (played: PlayedCard[], ctSnap: CT, observation: string, finalAttrs: Record<Attr, number | 'ilimitado'>, activeEntity?: BattleEntity) => {
+  const onSendPlay = (played: PlayedCard[], ctSnap: CT, observation: string, finalAttrs: Record<Attr, number | 'ilimitado'>, activeEntity?: BattleEntity, finalEntityAttrs?: Record<Attr, number | 'ilimitado'>, momentaryActions: MomentaryAction[] = []) => {
     const msg: ChatMsg = {
       id: uid(), turn, team: currentTeam, timestamp: Date.now(),
-      playedCards: played, ctSnapshot: ctSnap, activeEntitySnapshot: activeEntity, ctObservation: observation, finalAttrs,
+      playedCards: played, ctSnapshot: ctSnap, activeEntitySnapshot: activeEntity, ctObservation: observation, finalAttrs, finalEntityAttrs, momentaryActions,
     };
     setMessages((m) => [...m, msg]);
     advanceTurn();
@@ -292,7 +293,7 @@ function ChatBubble({ msg, t2Label, onImagePress }: { msg: ChatMsg; t2Label: str
             </View>
             {msg.finalAttrs && (
               <View style={{ marginTop: 6 }}>
-                {displayFinalAttrs(msg.finalAttrs!).map((a) => (
+                {visibleFinalAttrs(msg.finalAttrs!).map((a) => (
                   <Text key={a} style={styles.attrLine}>{a}: {formatNumberBR(msg.finalAttrs![a])}</Text>
                 ))}
               </View>
@@ -307,8 +308,14 @@ function ChatBubble({ msg, t2Label, onImagePress }: { msg: ChatMsg; t2Label: str
               <Text style={styles.cardName}>{msg.activeEntitySnapshot.entityType || 'entidade'} {msg.activeEntitySnapshot.name} — Rank {msg.activeEntitySnapshot.rank}</Text>
             </View>
             <Text style={styles.obs}>Custos/aumentos aplicados na entidade ativa.</Text>
+            {msg.finalEntityAttrs ? (
+              <View style={{ marginTop: 6 }}>
+                {ATTRS.map(a => <Text key={a} style={styles.attrLine}>{a}: {formatNumberBR(msg.finalEntityAttrs![a])}</Text>)}
+              </View>
+            ) : null}
           </View>
         ) : null}
+        {msg.momentaryActions?.map(action => <MomentaryBlock key={action.cardId} action={action} />)}
 
         <Text style={styles.time}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
       </View>
@@ -321,6 +328,8 @@ function renderEffectLines(c: Card) {
   const cost = ATTRS.filter(a => c.cost[a] != null).map(a => `${a}: ${formatNumberBR(c.cost[a])}`).join(', ');
   const boost = ATTRS.filter(a => c.boost[a] != null).map(a => `${a}: ${formatNumberBR(c.boost[a])}`).join(', ');
   const unl = ATTRS.filter(a => c.unlimited[a]).map(a => `${a}: ilimitado`).join(', ');
+  const momentary = ATTRS.filter(a => c.momentaryAttrs?.[a] != null).map(a => `${a}: ${formatNumberBR(c.momentaryAttrs?.[a])}`).join(', ');
+  if (momentary) lines.push(`Ação: ${momentary}${c.useCTInfluence ? ' + atributo base' : ''}`);
   if (cost) lines.push(`Custo: ${cost}`);
   if (boost) lines.push(`Aumento: ${boost}`);
   if (unl) lines.push(unl);
@@ -328,9 +337,18 @@ function renderEffectLines(c: Card) {
   return lines.map((l, i) => <Text key={i} style={styles.fxLine}>{l}</Text>);
 }
 
-function displayFinalAttrs(finalAttrs: Record<Attr, number | 'ilimitado'>) {
-  const hasDurEffect = finalAttrs.Dur === 'ilimitado' || Number(finalAttrs.Dur || 0) !== 0;
-  return hasDurEffect ? ATTRS : CT_ATTRS;
+function MomentaryBlock({ action }: { action: MomentaryAction }) {
+  const title = action.type === 'attack' ? 'Ataque momentâneo' : action.type === 'defense' ? 'Defesa momentânea' : 'Arma/equipamento';
+  const own = ATTRS.filter(a => action.own[a] != null).map(a => `${a}: ${formatNumberBR(action.own[a])}`).join(' • ');
+  const final = ATTRS.filter(a => action.final[a] != null).map(a => `${a}: ${formatNumberBR(action.final[a])}`).join(' • ');
+  return (
+    <View style={styles.ctBlock}>
+      <Text style={styles.cardName}>{title}: {action.cardName}</Text>
+      <Text style={styles.attrLine}>Próprio: {own || '0'}</Text>
+      <Text style={styles.attrLine}>Influência: {action.usedCTInfluence ? (action.source === 'entity' ? 'Invocação' : 'O C.T') : 'Não'}</Text>
+      <Text style={styles.attrLine}>Final: {final || '0'}</Text>
+    </View>
+  );
 }
 
 function ZoomableThumb({ uri, onPress }: { uri?: string; onPress: (uri: string) => void }) {
@@ -386,33 +404,17 @@ function entityFromCard(card: Card): BattleEntity {
   };
 }
 
-function computeFinalAttrs(target: CT | BattleEntity, selectedCards: Card[]) {
-  const finalAttrs: Record<Attr, number | 'ilimitado'> = {} as any;
-  for (const a of ATTRS) {
-    const targetUnlimited = 'sourceCardId' in target ? target.unlimited[a] : false;
-    if (targetUnlimited) { finalAttrs[a] = 'ilimitado'; continue; }
-    let v = 'sourceCardId' in target || a !== 'Dur' ? sanitizeNum(String(target.attrs[a] ?? 0)) : 0;
-    let unl = false;
-    for (const c of selectedCards) {
-      if (c.unlimited[a]) { unl = true; break; }
-      if (c.cost[a] != null) v -= (c.cost[a] as number);
-      if (c.boost[a] != null) v += (c.boost[a] as number);
-    }
-    finalAttrs[a] = unl ? 'ilimitado' : (isFinite(v) ? v : 0);
-  }
-  return finalAttrs;
-}
-
 // ====== Play Modal ======
 function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm }:
   { visible: boolean; onClose: () => void; cards: Card[]; activeCT: CT | null;
     onImagePress: (uri: string) => void;
-    onConfirm: (p: PlayedCard[], ct: CT, obs: string, finalAttrs: Record<Attr, number | 'ilimitado'>, activeEntity?: BattleEntity) => void }) {
+    onConfirm: (p: PlayedCard[], ct: CT, obs: string, finalAttrs: Record<Attr, number | 'ilimitado'>, activeEntity?: BattleEntity, finalEntityAttrs?: Record<Attr, number | 'ilimitado'>, momentaryActions?: MomentaryAction[]) => void }) {
 
   const [step, setStep] = useState<'cards' | 'card-edit' | 'target'>('cards');
   const [selectedCards, setSelectedCards] = useState<Card[]>([]);
   const [editIdx, setEditIdx] = useState(0);
   const [activeEntityId, setActiveEntityId] = useState<string | null>(null);
+  const [entityCostCardIds, setEntityCostCardIds] = useState<string[]>([]);
   const [observation, setObservation] = useState('');
   const [cardQuery, setCardQuery] = useState('');
   const [cardRanks, setCardRanks] = useState<CardRank[]>([]);
@@ -420,7 +422,7 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
 
   useEffect(() => {
     if (visible) {
-      setStep('cards'); setSelectedCards([]); setEditIdx(0); setActiveEntityId(null); setObservation('');
+      setStep('cards'); setSelectedCards([]); setEditIdx(0); setActiveEntityId(null); setEntityCostCardIds([]); setObservation('');
       setCardQuery(''); setCardRanks([]);
       Storage.getLastPlayedCardIds().then(setLastCardIds);
     }
@@ -463,15 +465,19 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
   });
   const entities = selectedCards.filter(c => c.entityType).map(entityFromCard);
   const activeEntity = entities.find(e => e.id === activeEntityId);
+  const toggleEntityCostCard = (cardId: string) => setEntityCostCardIds(ids => ids.includes(cardId) ? ids.filter(id => id !== cardId) : [...ids, cardId]);
+  const entityCostNames = selectedCards.filter(c => entityCostCardIds.includes(c.id)).map(c => c.name).join(', ');
+  const ctCostNames = selectedCards.filter(c => !entityCostCardIds.includes(c.id)).map(c => c.name).join(', ');
 
   const confirmPlay = () => {
     if (!activeCT) { Alert.alert('Atenção', 'O C.T inicial não está definido.'); return; }
-    const target = activeEntity || activeCT;
-    const finalAttrs = computeFinalAttrs(target, selectedCards);
+    const entityCostIds = activeEntity ? entityCostCardIds : [];
+    const resolved = resolveCombat(activeCT, activeEntity, selectedCards, entityCostIds);
     const targetNote = activeEntity ? `Alvo ativo: ${activeEntity.entityType || 'entidade'} ${activeEntity.name}.` : 'Alvo ativo: O C.T principal.';
-    const obs = [targetNote, observation.trim()].filter(Boolean).join(' ');
+    const costNote = activeEntity && entityCostIds.length > 0 ? `Custo na invocação: ${selectedCards.filter(c => entityCostIds.includes(c.id)).map(c => c.name).join(', ')}.` : 'Custos no O C.T principal.';
+    const obs = [targetNote, costNote, observation.trim()].filter(Boolean).join(' ');
     Storage.saveLastPlayedCardIds(selectedCards.map(c => c.id));
-    onConfirm(selectedCards.map(c => ({ cardSnapshot: c })), activeCT, obs, finalAttrs, activeEntity);
+    onConfirm(selectedCards.map(c => ({ cardSnapshot: c })), activeCT, obs, resolved.finalAttrs, activeEntity, resolved.finalEntityAttrs, resolved.momentaryActions);
   };
 
   return (
@@ -551,6 +557,25 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
                     {ATTRS.map(a => <Text key={a} style={styles.attrLine}>{a}: {formatNumberBR(activeEntity.attrs[a])}</Text>)}
                   </View>
                 ) : null}
+                {activeEntity ? (
+                  <View>
+                    <Text style={styles.label}>Quais técnicas usam custo da invocação?</Text>
+                    <View style={styles.chipsRow}>
+                      <Chip label="Nenhuma" active={entityCostCardIds.length === 0} onPress={() => setEntityCostCardIds([])} testID="play-entity-cost-none" />
+                      {selectedCards.map(card => (
+                        <Chip
+                          key={card.id}
+                          label={card.name}
+                          active={entityCostCardIds.includes(card.id)}
+                          onPress={() => toggleEntityCostCard(card.id)}
+                          testID={`play-entity-cost-${card.id}`}
+                        />
+                      ))}
+                    </View>
+                    <Text style={styles.obs}>Custo no O C.T: {ctCostNames || 'nenhum'}</Text>
+                    <Text style={styles.obs}>Custo na invocação: {entityCostNames || 'nenhum'}</Text>
+                  </View>
+                ) : null}
                 <Input
                   label="Observação"
                   value={observation}
@@ -576,6 +601,7 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
 }
 
 function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<Card>) => void }) {
+  const showMomentary = card.actionType === 'attack' || card.actionType === 'defense' || card.actionType === 'equipment';
   return (
     <View>
       <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 10 }}>
@@ -583,6 +609,23 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
         <Text style={styles.pickName}>{card.name} — {card.rank || 'E'} • Speed: {card.speed ?? 0}</Text>
       </View>
       <Input label="Legenda (desta jogada)" value={card.caption} onChangeText={(t) => onChange({ caption: t })} multiline numberOfLines={3} style={{ minHeight: 70, textAlignVertical: 'top' }} testID="play-card-caption" />
+      {showMomentary ? (
+        <>
+          <Text style={styles.label}>Valor momentâneo</Text>
+          <AttrEditor
+            label={card.actionType === 'defense' ? 'Defesa momentânea' : card.actionType === 'equipment' ? 'Atk/Def da arma' : 'Ataque momentâneo'}
+            values={card.momentaryAttrs || {}}
+            setValues={(v) => onChange({ momentaryAttrs: v })}
+            keyPrefix={`play-momentary-${card.id}`}
+            allowedAttrs={card.actionType === 'attack' ? ['Atk'] : card.actionType === 'defense' ? ['Def'] : ['Atk', 'Def']}
+          />
+          <Text style={styles.label}>Usar atributo do O C.T/alvo no cálculo?</Text>
+          <View style={styles.chipsRow}>
+            <Chip label="Não" active={!card.useCTInfluence} onPress={() => onChange({ useCTInfluence: false })} testID={`play-influence-no-${card.id}`} />
+            <Chip label="Sim" active={!!card.useCTInfluence} onPress={() => onChange({ useCTInfluence: true })} testID={`play-influence-yes-${card.id}`} />
+          </View>
+        </>
+      ) : null}
       <Text style={styles.label}>Custo</Text>
       <AttrEditor label="Custo" values={card.cost} setValues={(v) => onChange({ cost: v })} keyPrefix={`play-cost-${card.id}`} />
       <Text style={styles.label}>Aumento</Text>

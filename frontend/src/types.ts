@@ -11,6 +11,7 @@ export type UnlimitedFlags = Partial<Record<Attr, boolean>>;
 
 export type CardEffect = 'none' | 'cost' | 'boost' | 'cost_boost' | 'unlimited';
 export type EntityType = 'invocação' | 'marionete' | 'edo tensei' | 'entidade' | 'criatura';
+export type CardActionType = 'attribute' | 'attack' | 'defense' | 'equipment' | 'mode' | 'entity';
 
 export type Card = {
   id: string;
@@ -19,6 +20,9 @@ export type Card = {
   image?: string;
   rank: CardRank;
   speed?: number;
+  actionType?: CardActionType;
+  momentaryAttrs?: AttrValues;
+  useCTInfluence?: boolean;
   effect: CardEffect;
   entityType?: EntityType;
   entityAttrs?: Record<Attr, number>;
@@ -51,6 +55,16 @@ export type PlayedCard = {
   cardSnapshot: Card;
 };
 
+export type MomentaryAction = {
+  cardId: string;
+  cardName: string;
+  type: CardActionType;
+  own: AttrValues;
+  usedCTInfluence: boolean;
+  final: AttrValues;
+  source: 'ct' | 'entity';
+};
+
 export type BattleEntity = {
   id: string;
   name: string;
@@ -73,6 +87,8 @@ export type ChatMsg = {
   activeEntitySnapshot?: BattleEntity;
   ctObservation?: string;
   finalAttrs?: Record<Attr, number | 'ilimitado'>;
+  finalEntityAttrs?: Record<Attr, number | 'ilimitado'>;
+  momentaryActions?: MomentaryAction[];
 };
 
 export type BattleHistoryItem = {
