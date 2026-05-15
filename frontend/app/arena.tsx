@@ -5,40 +5,61 @@ import Screen from '../src/components/Screen';
 import Button from '../src/components/Button';
 import Chip from '../src/components/Chip';
 import { theme } from '../src/theme';
-import { MatchType } from '../src/types';
+import { BossDifficulty, MatchType } from '../src/types';
 import { Storage } from '../src/storage';
 import { Header } from './profile';
 
 const NORMAL_MATCHES: MatchType[] = ['1x1', '1x2', '2x2', '3x1', '3x2', '3x3'];
-const BOSS_MATCHES: MatchType[] = ['1xBoss', '2xBoss', '3xBoss'];
 const TIMES = [10, 20, 30];
+const DIFFICULTIES: { id: BossDifficulty; label: string; help: string }[] = [
+  { id: 'facil', label: 'Fácil', help: 'Cards até Rank B' },
+  { id: 'medio', label: 'Médio', help: 'Cards até Rank A' },
+  { id: 'dificil', label: 'Difícil', help: 'Cards até Rank S' },
+  { id: 'impossivel', label: 'Impossível', help: 'Cards até Rank S' },
+];
 
-type ArenaMode = 'select' | 'local';
+type ArenaMode = 'select' | 'local' | 'mxh' | 'bossLocal' | 'bossOnline';
 
 export default function Arena() {
   const router = useRouter();
   const [mode, setMode] = useState<ArenaMode>('select');
   const [matchType, setMatchType] = useState<MatchType>('1x1');
   const [turnMinutes, setTurnMinutes] = useState<number>(20);
-  const isBoss = matchType.includes('Boss');
+  const [bossDifficulty, setBossDifficulty] = useState<BossDifficulty>('facil');
 
   const handleBack = () => {
-    if (mode === 'local') {
+    if (mode === 'local' || mode === 'mxh') {
       setMode('select');
+      return;
+    }
+    if (mode === 'bossLocal' || mode === 'bossOnline') {
+      setMode('mxh');
       return;
     }
     router.back();
   };
 
-  const start = async () => {
+  const startLocal = async () => {
     const cts = await Storage.getCTs();
     if (cts.length === 0) {
       alert('Crie pelo menos um C.T antes de iniciar a luta.');
       return;
     }
     router.push({
-      pathname: isBoss ? '/boss-intro' : '/battle',
-      params: { matchType, turnMinutes: isBoss ? '0' : String(turnMinutes) },
+      pathname: '/battle',
+      params: { matchType, turnMinutes: String(turnMinutes) },
+    });
+  };
+
+  const startBossLocal = async () => {
+    const cts = await Storage.getCTs();
+    if (cts.length === 0) {
+      alert('Crie pelo menos um C.T antes de iniciar a luta.');
+      return;
+    }
+    router.push({
+      pathname: '/boss-intro',
+      params: { matchType: '1xBoss', turnMinutes: '0', bossDifficulty },
     });
   };
 
@@ -68,7 +89,70 @@ export default function Arena() {
             style={{ marginTop: 8 }}
           />
           <Text style={styles.modeHelp}>Crie ou entre em uma sala online 1x1 usando código.</Text>
+
+          <Button
+            title="MxH"
+            onPress={() => setMode('mxh')}
+            variant="secondary"
+            testID="arena-mxh-mode-btn"
+            style={{ marginTop: 8 }}
+          />
+          <Text style={styles.modeHelp}>Enfrente Bosses no modo jogador contra monstro.</Text>
         </View>
+      </Screen>
+    );
+  }
+
+  if (mode === 'mxh') {
+    return (
+      <Screen testID="arena-mxh-screen">
+        <Header title="MxH" onBack={handleBack} />
+
+        <View style={styles.panel}>
+          <Text style={styles.title}>MxH</Text>
+          <Text style={styles.subtitle}>Jogador contra Boss</Text>
+        </View>
+
+        <View style={styles.modeCards}>
+          <Button title="Boss Local" onPress={() => setMode('bossLocal')} testID="mxh-boss-local-btn" />
+          <Text style={styles.modeHelp}>Luta 1x1 local contra Boss, com introdução e dificuldade.</Text>
+
+          <Button title="Boss Online" variant="secondary" onPress={() => setMode('bossOnline')} testID="mxh-boss-online-btn" />
+          <Text style={styles.modeHelp}>Estrutura inicial de sala para até 3 jogadores contra Boss.</Text>
+        </View>
+      </Screen>
+    );
+  }
+
+  if (mode === 'bossLocal' || mode === 'bossOnline') {
+    return (
+      <Screen testID={mode === 'bossLocal' ? 'arena-boss-local-screen' : 'arena-boss-online-screen'}>
+        <Header title={mode === 'bossLocal' ? 'Boss Local' : 'Boss Online'} onBack={handleBack} />
+
+        <View style={styles.panel}>
+          <Text style={styles.title}>{mode === 'bossLocal' ? 'Boss Local' : 'Boss Online'}</Text>
+          <Text style={styles.subtitle}>Kael’Zor • ENE preparada</Text>
+        </View>
+
+        <Text style={styles.label}>Dificuldade</Text>
+        <View style={styles.row}>
+          {DIFFICULTIES.map(item => (
+            <Chip key={item.id} label={item.label} active={item.id === bossDifficulty} onPress={() => setBossDifficulty(item.id)} testID={`boss-difficulty-${item.id}`} />
+          ))}
+        </View>
+        <Text style={styles.modeHelp}>{DIFFICULTIES.find(item => item.id === bossDifficulty)?.help}</Text>
+
+        <View style={styles.summary}>
+          <Text style={styles.summaryLine}>Boss: <Text style={styles.summaryVal}>Kael’Zor</Text></Text>
+          <Text style={styles.summaryLine}>Atributos preparados: <Text style={styles.summaryVal}>HP • Atk • Def • Ag • ENE</Text></Text>
+          <Text style={styles.summaryLine}>Dificuldade: <Text style={styles.summaryVal}>{DIFFICULTIES.find(item => item.id === bossDifficulty)?.label}</Text></Text>
+        </View>
+
+        {mode === 'bossLocal' ? (
+          <Button title="Iniciar Boss Local" onPress={startBossLocal} testID="boss-local-start-btn" style={{ marginTop: 16 }} />
+        ) : (
+          <Button title="Abrir Sala Boss Online" onPress={() => router.push({ pathname: '/boss-online', params: { bossDifficulty } })} testID="boss-online-open-btn" style={{ marginTop: 16 }} />
+        )}
       </Screen>
     );
   }
@@ -89,31 +173,20 @@ export default function Arena() {
         ))}
       </View>
 
-      <Text style={[styles.label, { marginTop: 12 }]}>Contra Boss</Text>
+      <Text style={[styles.label, { marginTop: 16 }]}>Tempo por turno</Text>
       <View style={styles.row}>
-        {BOSS_MATCHES.map(t => (
-          <Chip key={t} label={t} active={t === matchType} onPress={() => setMatchType(t)} testID={`match-${t}`} />
+        {TIMES.map(t => (
+          <Chip key={t} label={`${t} min`} active={t === turnMinutes} onPress={() => setTurnMinutes(t)} testID={`time-${t}`} />
         ))}
       </View>
-
-      {!isBoss && (
-        <>
-          <Text style={[styles.label, { marginTop: 16 }]}>Tempo por turno</Text>
-          <View style={styles.row}>
-            {TIMES.map(t => (
-              <Chip key={t} label={`${t} min`} active={t === turnMinutes} onPress={() => setTurnMinutes(t)} testID={`time-${t}`} />
-            ))}
-          </View>
-        </>
-      )}
 
       <View style={styles.summary}>
         <Text style={styles.summaryLine}>Modo: <Text style={styles.summaryVal}>Local</Text></Text>
         <Text style={styles.summaryLine}>Tipo: <Text style={styles.summaryVal}>{matchType}</Text></Text>
-        {!isBoss && <Text style={styles.summaryLine}>Tempo: <Text style={styles.summaryVal}>{turnMinutes} min/turno</Text></Text>}
+        <Text style={styles.summaryLine}>Tempo: <Text style={styles.summaryVal}>{turnMinutes} min/turno</Text></Text>
       </View>
 
-      <Button title="Iniciar Luta Local" onPress={start} testID="arena-start-btn" style={{ marginTop: 16 }} />
+      <Button title="Iniciar Luta Local" onPress={startLocal} testID="arena-start-btn" style={{ marginTop: 16 }} />
     </Screen>
   );
 }

@@ -16,6 +16,15 @@ export type CardType = 'técnica' | 'modo/buff' | 'arma/equipamento' | 'invocaç
 export type DurationType = 'instantâneo' | 'turnos' | 'persistente';
 export type StackBehavior = 'stack' | 'replace';
 export type CardSpeed = number | 'instant';
+export type BossDifficulty = 'facil' | 'medio' | 'dificil' | 'impossivel';
+
+export type BossStats = {
+  Hp: number;
+  Atk: number;
+  Def: number;
+  Ag: number;
+  Ene: number;
+};
 
 export type Card = {
   id: string;
@@ -58,6 +67,7 @@ export type BattleConfig = {
   matchType: MatchType;
   turnMinutes: number | null;
   startedAt: number;
+  bossDifficulty?: BossDifficulty;
 };
 
 export type PlayedCard = {

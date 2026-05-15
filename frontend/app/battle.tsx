@@ -8,8 +8,8 @@ import Input from '../src/components/Input';
 import Chip from '../src/components/Chip';
 import ZoomableImageModal from '../src/components/ZoomableImageModal';
 import { Storage, uid } from '../src/storage';
-import { BattleEntity, Card, CT, ChatMsg, MatchType, MomentaryAction, PlayedCard } from '../src/types';
-import { ATTRS, CT_ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CardRank, Rank } from '../src/theme';
+import { BattleEntity, BossDifficulty, Card, CT, ChatMsg, MatchType, MomentaryAction, PlayedCard } from '../src/types';
+import { ATTRS, CT_ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CARD_RANK_ORDER, CardRank, Rank } from '../src/theme';
 import { AttrEditor, UnlimitedEditor } from './card-edit';
 import { ctDisplayName, formatNumberBR, formatSpeed } from '../src/format';
 import { applyUpkeep, resolveCombat, subtractAttrs, visibleFinalAttrs } from '../src/combat';
@@ -20,11 +20,14 @@ type ActiveEffect = { id: string; team: Team; card: Card; remainingTurns?: numbe
 
 const emptyBattleAttrs = (): BattleAttrs => ({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
 const ctToBattleAttrs = (ct: CT): BattleAttrs => ({ ...emptyBattleAttrs(), ...ct.attrs, Dur: 0 });
+const BOSS_DIFFICULTY_LABELS: Record<BossDifficulty, string> = { facil: 'Fácil', medio: 'Médio', dificil: 'Difícil', impossivel: 'Impossível' };
+const BOSS_DIFFICULTY_MAX_RANK: Record<BossDifficulty, CardRank> = { facil: 'B', medio: 'A', dificil: 'S', impossivel: 'S' };
 
 export default function Battle() {
   const router = useRouter();
-  const { matchType, turnMinutes } = useLocalSearchParams<{ matchType: MatchType; turnMinutes: string }>();
+  const { matchType, turnMinutes, bossDifficulty } = useLocalSearchParams<{ matchType: MatchType; turnMinutes: string; bossDifficulty?: BossDifficulty }>();
   const isBoss = String(matchType || '').includes('Boss');
+  const difficulty = bossDifficulty || 'facil';
   const totalMinutes = parseInt(String(turnMinutes || '0'), 10);
   const turnSeconds = totalMinutes > 0 ? totalMinutes * 60 : 0;
 
@@ -117,7 +120,7 @@ export default function Battle() {
       const next = [...m, { id: uid(), turn, team: 'system' as const, text, timestamp: Date.now() }];
       Storage.appendHistory({
         id: uid(), endedAt: Date.now(), result: text, messages: next,
-        config: { matchType: matchType as MatchType, turnMinutes: isBoss ? null : totalMinutes, startedAt: Date.now() },
+        config: { matchType: matchType as MatchType, turnMinutes: isBoss ? null : totalMinutes, startedAt: Date.now(), bossDifficulty: isBoss ? difficulty : undefined },
       });
       return next;
     });
@@ -140,9 +143,6 @@ export default function Battle() {
       let next = effects.filter(effect => effect.team !== currentTeam || keptActiveEffectIds.includes(effect.id));
       persistent.forEach((card, index) => {
         if (next.some(effect => effect.team === currentTeam && effect.card.id === card.id)) return;
-        if (card.stackBehavior === 'replace') {
-          next = next.filter(effect => !(effect.team === currentTeam && effect.card.cardType === card.cardType));
-        }
         next.push({ id: `${card.id}:${Date.now()}:${index}`, team: currentTeam, card, remainingTurns: card.durationType === 'turnos' ? card.durationTurns || 0 : undefined });
       });
       return next;
@@ -150,8 +150,22 @@ export default function Battle() {
   };
 
   const passTurn = () => {
-    addSystem(`${currentTeam === 'team1' ? 'Time 1' : t2Label} passou o turno.`);
+    deactivateUnselectedActives(currentTeam, `${currentTeam === 'team1' ? 'Time 1' : t2Label} passou o turno.`);
     advanceTurn();
+  };
+
+  const deactivateUnselectedActives = (team: Team, prefix?: string) => {
+    const effects = activeEffects.filter(effect => effect.team === team);
+    if (effects.length === 0) {
+      if (prefix) addSystem(prefix);
+      return;
+    }
+    const nextAttrs = effects.reduce((attrs, effect) => subtractAttrs(attrs, effect.card.boost), battleAttrs[team]);
+    setBattleAttrs((attrs) => ({ ...attrs, [team]: nextAttrs }));
+    setActiveEffects((items) => items.filter(effect => effect.team !== team));
+    const removed = effects.map(effect => effect.card.name).join(', ');
+    const finalText = `Atributos atuais: ${CT_ATTRS.map(attr => `${attr}:${formatNumberBR(nextAttrs[attr])}`).join(' • ')}.`;
+    addSystem([prefix, `Desativado: ${removed}. Bônus removido.`, finalText].filter(Boolean).join(' '));
   };
 
   const sendLocalChat = () => {
@@ -171,38 +185,8 @@ export default function Battle() {
       setT1Played(newT1); setT2Played(newT2);
     }
     const nextTeam = currentTeam === 'team1' ? 'team2' : 'team1';
-    applyTurnUpkeep(nextTeam);
     setCurrentTeam(nextTeam);
     setTimeLeft(turnSeconds);
-  };
-
-  const applyTurnUpkeep = (team: Team) => {
-    setActiveEffects((effects) => {
-      if (!effects.some(effect => effect.team === team)) return effects;
-      let nextAttrs = battleAttrs[team];
-      const logs: string[] = [];
-      const remaining: ActiveEffect[] = [];
-      for (const effect of effects) {
-        if (effect.team !== team) { remaining.push(effect); continue; }
-        const upkeep = ATTRS.filter(attr => effect.card.upkeepCost?.[attr] != null).map(attr => `${attr}:${formatNumberBR(effect.card.upkeepCost?.[attr])}`).join(', ');
-        if (upkeep) {
-          const missing = ATTRS.filter(attr => nextAttrs[attr] !== 'ilimitado' && effect.card.upkeepCost?.[attr] != null && Number(nextAttrs[attr] || 0) < Number(effect.card.upkeepCost?.[attr] || 0));
-          nextAttrs = applyUpkeep(nextAttrs, effect.card.upkeepCost);
-          logs.push(`${effect.card.name}: custo por turno ${upkeep}.`);
-          if (missing.length > 0) logs.push(`${effect.card.name}: recurso insuficiente em ${missing.join(', ')}.`);
-        }
-        const nextRemaining = effect.remainingTurns == null ? undefined : Math.max(0, effect.remainingTurns - 1);
-        if (effect.card.durationType === 'turnos' && nextRemaining === 0) {
-          nextAttrs = subtractAttrs(nextAttrs, effect.card.boost);
-          logs.push(`${effect.card.name} acabou.`);
-        } else {
-          remaining.push({ ...effect, remainingTurns: nextRemaining });
-        }
-      }
-      setBattleAttrs((attrs) => ({ ...attrs, [team]: nextAttrs }));
-      if (logs.length > 0) setMessages((m) => [...m, { id: uid(), turn, team: 'system', text: logs.join(' '), timestamp: Date.now() }]);
-      return remaining;
-    });
   };
 
   const disableActive = (effectId: string) => {
@@ -234,7 +218,7 @@ export default function Battle() {
           <Text style={styles.headerTitle}>Turno de Apresentação</Text>
         </View>
 
-        <Text style={styles.subInfo}>{matchType} • {isBoss ? 'Contra Boss (sem tempo)' : `${totalMinutes} min/turno`}</Text>
+        <Text style={styles.subInfo}>{matchType} • {isBoss ? `Contra Boss • ${BOSS_DIFFICULTY_LABELS[difficulty]}` : `${totalMinutes} min/turno`}</Text>
 
         {cts.length === 0 ? (
           <Text style={styles.empty}>Crie pelo menos um C.T antes de iniciar a luta.</Text>
@@ -304,6 +288,7 @@ export default function Battle() {
         cards={cards}
         activeCT={currentActiveCT}
         activeEffects={activeEffects.filter(effect => effect.team === currentTeam)}
+        bossDifficulty={isBoss ? difficulty : undefined}
         onImagePress={setZoomImage}
         onConfirm={(played, ctSnap, obs, finalAttrs, keptActiveEffectIds, activeEntity, finalEntityAttrs, momentaryActions) => {
           setPickerVisible(false);
@@ -325,7 +310,7 @@ function ActiveCardsBar({ effects, onDisable }: { effects: ActiveEffect[]; onDis
         const boost = ATTRS.filter(a => card.boost?.[a] != null).map(a => `${a}:${formatNumberBR(card.boost?.[a])}`).join(' • ');
         return (
           <View key={effect.id} style={styles.activeItem}>
-            <Text style={styles.cardName}>{card.name} • {card.cardType || 'técnica'} • {card.stackBehavior === 'replace' ? 'substitui' : 'acumula'}</Text>
+            <Text style={styles.cardName}>{card.name} • {card.cardType || 'técnica'}</Text>
             <Text style={styles.obs}>Duração: {card.durationType === 'turnos' ? `por turnos (${effect.remainingTurns || 0})` : 'persistente'}{upkeep ? ` • Custo/turno: ${upkeep}` : ''}</Text>
             {boost ? <Text style={styles.obs}>Bônus ativo: {boost}</Text> : null}
             <Pressable onPress={() => onDisable(effect.id)} style={styles.activeDisable}><Text style={styles.activeDisableText}>Desativar</Text></Pressable>
@@ -482,6 +467,22 @@ function canCTUseCard(ct: CT | null, card: Card) {
   return order[card.rank || 'E'] <= order[ct.rank];
 }
 
+function canBossDifficultyUseCard(difficulty: BossDifficulty, card: Card) {
+  return CARD_RANK_ORDER[card.rank || 'E'] <= CARD_RANK_ORDER[BOSS_DIFFICULTY_MAX_RANK[difficulty]];
+}
+
+function cloneCardForPlay(card: Card, captions: Record<string, string>) {
+  return {
+    ...card,
+    caption: captions[card.id] ?? card.caption,
+    cost: { ...card.cost },
+    boost: { ...card.boost },
+    unlimited: { ...card.unlimited },
+    entityAttrs: card.entityAttrs ? { ...card.entityAttrs } : undefined,
+    entityUnlimited: card.entityUnlimited ? { ...card.entityUnlimited } : undefined,
+  };
+}
+
 function entityFromCard(card: Card): BattleEntity {
   return {
     id: `${card.id}:entity`,
@@ -496,8 +497,8 @@ function entityFromCard(card: Card): BattleEntity {
 }
 
 // ====== Play Modal ======
-function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], onImagePress, onConfirm }:
-  { visible: boolean; onClose: () => void; cards: Card[]; activeCT: CT | null; activeEffects?: ActiveEffect[];
+function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], bossDifficulty, onImagePress, onConfirm }:
+  { visible: boolean; onClose: () => void; cards: Card[]; activeCT: CT | null; activeEffects?: ActiveEffect[]; bossDifficulty?: BossDifficulty;
     onImagePress: (uri: string) => void;
     onConfirm: (p: PlayedCard[], ct: CT, obs: string, finalAttrs: Record<Attr, number | 'ilimitado'>, keptActiveEffectIds: string[], activeEntity?: BattleEntity, finalEntityAttrs?: Record<Attr, number | 'ilimitado'>, momentaryActions?: MomentaryAction[]) => void }) {
 
@@ -512,21 +513,25 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], onIm
   const [cardRanks, setCardRanks] = useState<CardRank[]>([]);
   const [lastCardIds, setLastCardIds] = useState<string[]>([]);
   const [lastCaptions, setLastCaptions] = useState<Record<string, string>>({});
-  const [keepActiveEffectIds, setKeepActiveEffectIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (visible) {
-      setStep('cards'); setSelectedCards([]); setEditIdx(0); setActiveEntityId(null); setEntityCostCardIds([]); setEntityBoostCardIds([]); setObservation('');
-      setCardQuery(''); setCardRanks([]); setKeepActiveEffectIds([]);
+      setStep('cards'); setEditIdx(0); setActiveEntityId(null); setEntityCostCardIds([]); setEntityBoostCardIds([]); setObservation('');
+      setCardQuery(''); setCardRanks([]);
       Storage.getLastPlayedCardIds().then(setLastCardIds);
-      Storage.getLastCardCaptions().then(setLastCaptions);
+      Storage.getLastCardCaptions().then((captions) => {
+        setLastCaptions(captions);
+        setSelectedCards(activeEffects.map(effect => cloneCardForPlay(effect.card, captions)));
+      });
     }
+  // Reset only when the modal opens; activeEffects is intentionally captured from that open.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
   const toggleCard = (c: Card) => {
     setSelectedCards((arr) => arr.some(x => x.id === c.id)
       ? arr.filter(x => x.id !== c.id)
-      : [...arr, { ...c, caption: lastCaptions[c.id] ?? c.caption, cost: { ...c.cost }, boost: { ...c.boost }, unlimited: { ...c.unlimited }, entityAttrs: c.entityAttrs ? { ...c.entityAttrs } : undefined, entityUnlimited: c.entityUnlimited ? { ...c.entityUnlimited } : undefined }]);
+      : [...arr, cloneCardForPlay(c, lastCaptions)]);
   };
   const updateCard = (patch: Partial<Card>) => {
     setSelectedCards(arr => arr.map((c, i) => i === editIdx ? { ...c, ...patch } : c));
@@ -545,8 +550,16 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], onIm
     else setStep('target');
   };
   const toggleCardRank = (rank: CardRank) => setCardRanks((ranks) => ranks.includes(rank) ? ranks.filter(r => r !== rank) : [...ranks, rank]);
-  const toggleKeepActiveEffect = (effectId: string) => setKeepActiveEffectIds(ids => ids.includes(effectId) ? ids.filter(id => id !== effectId) : [...ids, effectId]);
+  const toggleActiveCard = (card: Card) => setSelectedCards((arr) => arr.some(item => item.id === card.id) ? arr.filter(item => item.id !== card.id) : [...arr, cloneCardForPlay(card, lastCaptions)]);
+  const activeCardIds = activeEffects.map(effect => effect.card.id);
   const visibleCards = [...cards].sort((a, b) => {
+    const aa = activeCardIds.indexOf(a.id);
+    const ba = activeCardIds.indexOf(b.id);
+    if (aa !== -1 || ba !== -1) {
+      if (aa === -1) return 1;
+      if (ba === -1) return -1;
+      return aa - ba;
+    }
     const ai = lastCardIds.indexOf(a.id);
     const bi = lastCardIds.indexOf(b.id);
     if (ai === -1 && bi === -1) return 0;
@@ -557,7 +570,8 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], onIm
     const q = cardQuery.trim().toLowerCase();
     const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''} ${formatSpeed(c.speed)}`.toLowerCase().includes(q);
     const rankOk = cardRanks.length === 0 || cardRanks.includes(c.rank || 'E');
-    return queryOk && rankOk && canCTUseCard(activeCT, c);
+    const bossOk = !bossDifficulty || canBossDifficultyUseCard(bossDifficulty, c);
+    return queryOk && rankOk && bossOk && canCTUseCard(activeCT, c);
   });
   const entities = selectedCards.filter(c => c.entityType).map(entityFromCard);
   const activeEntity = entities.find(e => e.id === activeEntityId);
@@ -573,23 +587,28 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], onIm
     const entityCostIds = activeEntity ? entityCostCardIds : [];
     const entityBoostIds = activeEntity ? entityBoostCardIds : [];
     const selectedCardIds = new Set(selectedCards.map(card => card.id));
-    const keptEffects = activeEffects.filter(effect => keepActiveEffectIds.includes(effect.id) || selectedCardIds.has(effect.card.id));
+    const keptEffects = activeEffects.filter(effect => selectedCardIds.has(effect.card.id));
     const keptEffectIds = keptEffects.map(effect => effect.id);
     const droppedEffects = activeEffects.filter(effect => !keptEffectIds.includes(effect.id));
-    const replacingEffects = keptEffects.filter(effect => selectedCards.some(card => card.durationType !== 'instantâneo' && card.stackBehavior === 'replace' && card.cardType === effect.card.cardType && card.id !== effect.card.id));
-    const removedEffects = [...droppedEffects, ...replacingEffects].filter((effect, index, arr) => arr.findIndex(item => item.id === effect.id) === index);
+    const removedEffects = droppedEffects;
     const activeIds = keptEffects.map(effect => effect.card.id);
-    const effectiveCT = removedEffects.length > 0
-      ? { ...activeCT, attrs: removedEffects.reduce((attrs, effect) => subtractAttrs(attrs, effect.card.boost), activeCT.attrs as BattleAttrs) as Record<Attr, number> }
-      : activeCT;
+    let effectiveAttrs = removedEffects.reduce((attrs, effect) => subtractAttrs(attrs, effect.card.boost), activeCT.attrs as BattleAttrs);
+    const upkeepNotes: string[] = [];
+    for (const effect of keptEffects) {
+      const upkeep = ATTRS.filter(attr => effect.card.upkeepCost?.[attr] != null).map(attr => `${attr}:${formatNumberBR(effect.card.upkeepCost?.[attr])}`).join(', ');
+      if (!upkeep) continue;
+      effectiveAttrs = applyUpkeep(effectiveAttrs, effect.card.upkeepCost);
+      upkeepNotes.push(`${effect.card.name}: custo por turno ${upkeep}`);
+    }
+    const effectiveCT = { ...activeCT, attrs: effectiveAttrs as Record<Attr, number> };
     const cardsForResolve = selectedCards.filter(card => !(card.durationType !== 'instantâneo' && activeIds.includes(card.id)));
     const resolved = resolveCombat(effectiveCT, activeEntity, cardsForResolve, entityCostIds, entityBoostIds);
     const targetNote = activeEntity ? `Alvo ativo: ${activeEntity.entityType || 'entidade'} ${activeEntity.name}.` : 'Alvo ativo: O C.T principal.';
     const costNote = activeEntity && entityCostIds.length > 0 ? `Custo na invocação: ${selectedCards.filter(c => entityCostIds.includes(c.id)).map(c => c.name).join(', ')}.` : 'Custos no O C.T principal.';
     const keptNote = keptEffects.length > 0 ? `Continua ativo: ${keptEffects.map(effect => effect.card.name).join(', ')}.` : '';
     const droppedNote = droppedEffects.length > 0 ? `Desativado: ${droppedEffects.map(effect => effect.card.name).join(', ')}. Bônus removido.` : '';
-    const replacedNote = replacingEffects.length > 0 ? `Substituído: ${replacingEffects.map(effect => effect.card.name).join(', ')}. Bônus antigo removido.` : '';
-    const obs = [targetNote, costNote, keptNote, droppedNote, replacedNote, observation.trim()].filter(Boolean).join(' ');
+    const upkeepNote = upkeepNotes.length > 0 ? `Custo por turno aplicado: ${upkeepNotes.join(' • ')}.` : '';
+    const obs = [targetNote, costNote, keptNote, droppedNote, upkeepNote, observation.trim()].filter(Boolean).join(' ');
     Storage.saveLastPlayedCardIds(selectedCards.map(c => c.id));
     Storage.getLastCardCaptions().then((captions) => Storage.saveLastCardCaptions({ ...captions, ...Object.fromEntries(selectedCards.map(c => [c.id, c.caption])) }));
     onConfirm(selectedCards.map(c => ({ cardSnapshot: c })), activeCT, obs, resolved.finalAttrs, keptEffectIds, activeEntity, resolved.finalEntityAttrs, resolved.momentaryActions);
@@ -652,26 +671,25 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], onIm
                 {activeEffects.length > 0 ? (
                   <View style={styles.activeConfirmBox}>
                     <Text style={styles.label}>Ativos atuais</Text>
-                    <Text style={styles.obs}>Marque os efeitos que continuam ativos. Os não marcados serão desativados ao enviar.</Text>
+                    <Text style={styles.obs}>Eles continuam apenas se estiverem selecionados. Desmarque para desativar ao enviar.</Text>
                     {activeEffects.map(effect => {
                       const selectedAgain = selectedCards.some(card => card.id === effect.card.id);
-                      const kept = keepActiveEffectIds.includes(effect.id) || selectedAgain;
                       const boost = ATTRS.filter(a => effect.card.boost?.[a] != null).map(a => `${a}:${formatNumberBR(effect.card.boost?.[a])}`).join(' • ');
                       return (
                         <View key={effect.id} style={styles.activeConfirmItem}>
                           <Text style={styles.cardName}>{effect.card.name} • {effect.card.cardType || 'técnica'}</Text>
-                          <Text style={styles.obs}>{kept ? 'Continua ativo' : 'Será desativado'}{boost ? ` • Bônus: ${boost}` : ''}</Text>
+                          <Text style={styles.obs}>{selectedAgain ? 'Continua ativo' : 'Será desativado'}{boost ? ` • Bônus: ${boost}` : ''}</Text>
                           <View style={styles.chipsRow}>
                             <Chip
-                              label={selectedAgain ? 'Mantido por seleção' : 'Manter ativo'}
-                              active={kept}
-                              onPress={() => !selectedAgain && toggleKeepActiveEffect(effect.id)}
+                              label="Manter ativo"
+                              active={selectedAgain}
+                              onPress={() => !selectedAgain && toggleActiveCard(effect.card)}
                               testID={`keep-active-${effect.id}`}
                             />
                             <Chip
                               label="Desativar"
-                              active={!kept}
-                              onPress={() => setKeepActiveEffectIds(ids => ids.filter(id => id !== effect.id))}
+                              active={!selectedAgain}
+                              onPress={() => selectedAgain && toggleActiveCard(effect.card)}
                               testID={`drop-active-${effect.id}`}
                             />
                           </View>

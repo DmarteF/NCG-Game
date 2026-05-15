@@ -7,7 +7,7 @@ import Input from '../src/components/Input';
 import ImagePickerField from '../src/components/ImagePickerField';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
-import { Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType, CardType, DurationType, StackBehavior, CardSpeed } from '../src/types';
+import { Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType, CardType, DurationType, CardSpeed } from '../src/types';
 import { ATTRS, Attr, theme, CARD_RANKS, CardRank } from '../src/theme';
 import { Header } from './profile';
 import { formatNumberBR } from '../src/format';
@@ -70,7 +70,6 @@ export default function CardEdit() {
   const [durationType, setDurationType] = useState<DurationType>('instantâneo');
   const [durationTurns, setDurationTurns] = useState(0);
   const [upkeepCost, setUpkeepCost] = useState<AttrValues>({});
-  const [stackBehavior, setStackBehavior] = useState<StackBehavior>('stack');
   const [effect, setEffect] = useState<CardEffect>('none');
   const [entityType, setEntityType] = useState<EntityType | undefined>();
   const [entityAttrs, setEntityAttrs] = useState<Record<Attr, number>>({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
@@ -92,7 +91,6 @@ export default function CardEdit() {
         setDurationType(c.durationType || 'instantâneo');
         setDurationTurns(c.durationTurns || 0);
         setUpkeepCost(c.upkeepCost || {});
-        setStackBehavior(c.stackBehavior || 'stack');
         setEntityAttrs({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0, ...(c.entityAttrs || {}) });
         setEffect(c.effect); setCost(c.cost); setBoost(c.boost); setUnlimited(c.unlimited);
       }
@@ -115,7 +113,6 @@ export default function CardEdit() {
       durationType,
       durationTurns: sanitizeNum(String(durationTurns)),
       upkeepCost: cleanAttrs(upkeepCost),
-      stackBehavior,
       effect,
       entityType: ['invocação', 'edo tensei', 'marionete'].includes(cardType) ? (cardType as EntityType) : entityType,
       entityAttrs: entityType ? entityAttrs : undefined,
@@ -265,11 +262,6 @@ export default function CardEdit() {
       ) : null}
       {durationType !== 'instantâneo' ? (
         <>
-          <Text style={styles.label}>Comportamento de acúmulo</Text>
-          <View style={styles.chipsRow}>
-            <Chip label="Acumula" active={stackBehavior === 'stack'} onPress={() => setStackBehavior('stack')} testID="stack-behavior-stack" />
-            <Chip label="Substitui mesma categoria" active={stackBehavior === 'replace'} onPress={() => setStackBehavior('replace')} testID="stack-behavior-replace" />
-          </View>
           <AttrEditor label="Custo por turno" values={upkeepCost} setValues={setUpkeepCost} keyPrefix="upkeep" />
         </>
       ) : null}
