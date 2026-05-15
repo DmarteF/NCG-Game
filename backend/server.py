@@ -105,8 +105,8 @@ def _generate_code() -> str:
 
 @api_router.post("/rooms")
 async def create_room(payload: RoomCreatePayload):
-    if payload.turnMinutes not in (10, 20, 30):
-        raise HTTPException(status_code=400, detail="turnMinutes must be 10, 20 or 30")
+    if payload.turnMinutes not in (0, 10, 20, 30):
+        raise HTTPException(status_code=400, detail="turnMinutes must be 0, 10, 20 or 30")
     async with ROOMS_LOCK:
         # cleanup very old empty rooms (>1h)
         now = datetime.now(timezone.utc).timestamp()

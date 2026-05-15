@@ -8,7 +8,7 @@ import Input from '../src/components/Input';
 import Chip from '../src/components/Chip';
 import ZoomableImageModal from '../src/components/ZoomableImageModal';
 import { Storage, uid } from '../src/storage';
-import { BattleEntity, Card, CT, MomentaryAction, PlayedCard } from '../src/types';
+import { BattleEntity, BossDifficulty, Card, CT, MatchType, MomentaryAction, PlayedCard } from '../src/types';
 import { ATTRS, CT_ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CardRank, Rank } from '../src/theme';
 import { AttrEditor, UnlimitedEditor } from './card-edit';
 import { RoomClient, WSEvent } from '../src/online';
@@ -38,11 +38,12 @@ type Phase = 'waiting' | 'init' | 'play' | 'ended';
 
 export default function OnlineBattle() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ role: 'host' | 'guest'; code: string; turnMinutes: string; playerName: string; playerVillage: string; playerImage?: string }>();
+  const params = useLocalSearchParams<{ role: 'host' | 'guest'; code: string; turnMinutes: string; playerName: string; playerVillage: string; playerImage?: string; bossMode?: string; bossDifficulty?: BossDifficulty; matchType?: MatchType }>();
   const role = params.role as 'host' | 'guest';
   const code = String(params.code || '');
   const totalMinutes = parseInt(String(params.turnMinutes || '20'), 10);
-  const turnSeconds = totalMinutes * 60;
+  const isBoss = params.bossMode === '1' || String(params.matchType || '').includes('Boss');
+  const turnSeconds = totalMinutes > 0 ? totalMinutes * 60 : 0;
 
   const me: PlayerInfo = useMemo(() => ({
     name: String(params.playerName || 'Jogador'),
@@ -97,7 +98,7 @@ export default function OnlineBattle() {
   // Timer
   useEffect(() => {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-    if (phase !== 'play' || currentTurn !== 'me') return;
+    if (phase !== 'play' || currentTurn !== 'me' || turnSeconds === 0) return;
     timerRef.current = setInterval(() => {
       setTimeLeft((t) => {
         const next = t - 1;
@@ -370,7 +371,7 @@ export default function OnlineBattle() {
           <Text style={styles.turnSub}>{currentTurn === 'me' ? 'Sua vez' : `Vez de ${opponent?.name || 'Oponente'}`}</Text>
           <Text style={styles.connText}>{connStatus === 'connected' ? 'Conectado' : connStatus}</Text>
         </View>
-        <View style={styles.timerBox}><Text style={styles.timerText}>{fmt(timeLeft)}</Text></View>
+        <View style={[styles.timerBox, isBoss && { opacity: 0.55 }]}><Text style={styles.timerText}>{isBoss ? '∞' : fmt(timeLeft)}</Text></View>
       </View>
 
       <FlatList

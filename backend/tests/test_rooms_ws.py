@@ -30,7 +30,7 @@ class TestRoomsREST:
         assert r.status_code == 400
 
     def test_create_room_each_time(self):
-        for tm in (10, 20, 30):
+        for tm in (0, 10, 20, 30):
             r = requests.post(f"{BASE_URL}/api/rooms", json={"turnMinutes": tm})
             assert r.status_code == 200
             assert r.json()["config"]["turnMinutes"] == tm
