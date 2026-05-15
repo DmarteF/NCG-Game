@@ -8,8 +8,9 @@ import Screen from '../src/components/Screen';
 import { apiCheckRoom, apiCreateRoom } from '../src/online';
 import { Storage } from '../src/storage';
 import { theme } from '../src/theme';
-import { BossDifficulty } from '../src/types';
+import { BossDifficulty, MatchType } from '../src/types';
 import { Header } from './profile';
+import Chip from '../src/components/Chip';
 
 const labels: Record<BossDifficulty, string> = {
   facil: 'Fácil',
@@ -23,6 +24,7 @@ export default function BossOnlineLobby() {
   const { bossDifficulty } = useLocalSearchParams<{ bossDifficulty?: BossDifficulty }>();
   const difficulty = bossDifficulty || 'facil';
   const [mode, setMode] = useState<'home' | 'create' | 'join'>('home');
+  const [matchType, setMatchType] = useState<MatchType>('3xBoss');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [errMsg, setErrMsg] = useState('');
@@ -30,17 +32,18 @@ export default function BossOnlineLobby() {
   const goWithProfile = async (role: 'host' | 'guest', roomCode: string) => {
     const p = await Storage.getProfile();
     router.replace({
-      pathname: '/online-battle',
+      pathname: '/team-online-battle',
       params: {
-        role,
         code: roomCode,
-        turnMinutes: '0',
+        turnMinutes: '30',
         playerName: (p?.name || 'Jogador').trim(),
         playerVillage: p?.village || '—',
         playerImage: p?.image || '',
         bossMode: '1',
         bossDifficulty: difficulty,
-        matchType: '3xBoss',
+        matchType,
+        team: 'team1',
+        leader: role === 'host' ? '1' : '0',
       },
     });
   };
@@ -49,7 +52,7 @@ export default function BossOnlineLobby() {
     setErrMsg('');
     try {
       setBusy(true);
-      const res = await apiCreateRoom(0);
+      const res = await apiCreateRoom(30, { matchType, bossMode: true });
       setBusy(false);
       await goWithProfile('host', res.code);
     } catch (e: any) {
@@ -100,6 +103,13 @@ export default function BossOnlineLobby() {
 
       {mode === 'create' ? (
         <View style={{ marginTop: 8 }}>
+          <Text style={styles.label}>Modo MxH</Text>
+          <View style={styles.row}>
+            {(['1xBoss', '2xBoss', '3xBoss'] as MatchType[]).map(item => (
+              <Chip key={item} label={item} active={matchType === item} onPress={() => setMatchType(item)} testID={`boss-online-match-${item}`} />
+            ))}
+          </View>
+          <Text style={styles.hint}>Boss sempre começa. Tempo fixo: 30 min por turno.</Text>
           <Text style={styles.label}>Sala MxH</Text>
           <Button title="Gerar código da sala Boss" onPress={createRoom} loading={busy} testID="boss-online-create-btn" />
           <Pressable onPress={() => setMode('home')} testID="boss-online-back-mode-btn"><Text style={styles.back}>Voltar</Text></Pressable>
@@ -133,4 +143,5 @@ const styles = StyleSheet.create({
   back: { color: theme.colors.textSecondary, fontSize: 13, textAlign: 'center', marginTop: 12 },
   hint: { color: theme.colors.textMuted, fontSize: 12, textAlign: 'center', marginTop: 8 },
   errorText: { color: theme.colors.danger, fontSize: 12, fontWeight: '700', marginBottom: 10 },
+  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
 });

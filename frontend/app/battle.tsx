@@ -13,6 +13,8 @@ import { ATTRS, CT_ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CARD_RANK_ORDER, 
 import { AttrEditor, UnlimitedEditor } from './card-edit';
 import { ctDisplayName, formatNumberBR, formatSpeed } from '../src/format';
 import { applyUpkeep, resolveCombat, subtractAttrs, visibleFinalAttrs } from '../src/combat';
+import { BossState, createBossCT, createKaelzorState } from '../src/bossData';
+import { PlayerActionAnalysis, resolveBossAttack, resolveBossDefense } from '../src/bossRules';
 
 type Team = 'team1' | 'team2';
 type BattleAttrs = Record<Attr, number | 'ilimitado'>;
@@ -47,9 +49,12 @@ export default function Battle() {
   const [localChatText, setLocalChatText] = useState('');
   const [activeEffects, setActiveEffects] = useState<ActiveEffect[]>([]);
   const [battleAttrs, setBattleAttrs] = useState<Record<Team, BattleAttrs>>({ team1: emptyBattleAttrs(), team2: emptyBattleAttrs() });
+  const [bossState, setBossState] = useState<BossState>(() => createKaelzorState(difficulty));
   const [result, setResult] = useState<string>('');
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const bossBusyRef = useRef(false);
+  const lastBossAnalysisRef = useRef<PlayerActionAnalysis | undefined>(undefined);
 
   useEffect(() => {
     Storage.getCards().then(setCards);
@@ -75,24 +80,42 @@ export default function Battle() {
   }, [phase, currentTeam, isBoss, turnSeconds]);
 
   const t2Label = isBoss ? 'Boss' : 'Time 2';
+  const bossCT = createBossCT(bossState);
   const activeCards = activeEffects.filter(effect => effect.team === currentTeam);
-  const currentActiveCT = (currentTeam === 'team1' ? initCT1 : initCT2)
+  const currentActiveCT = isBoss && currentTeam === 'team2'
+    ? bossCT
+    : (currentTeam === 'team1' ? initCT1 : initCT2)
     ? { ...(currentTeam === 'team1' ? initCT1! : initCT2!), attrs: battleAttrs[currentTeam] as Record<Attr, number> }
     : null;
+  const isAutoBossTurn = isBoss && currentTeam === 'team2';
 
   const startPresentation = () => {
-    if (!initCT1 || !initCT2) {
+    if (!initCT1 || (!isBoss && !initCT2)) {
       Alert.alert('Atenção', 'Cada lado precisa escolher um O C.T inicial.');
       return;
     }
-    setBattleAttrs({ team1: ctToBattleAttrs(initCT1), team2: ctToBattleAttrs(initCT2) });
+    if (isBoss) {
+      const freshBoss = createKaelzorState(difficulty);
+      const freshBossCT = createBossCT(freshBoss);
+      setBossState(freshBoss);
+      setInitCT2(freshBossCT);
+      lastBossAnalysisRef.current = undefined;
+      setBattleAttrs({ team1: ctToBattleAttrs(initCT1), team2: ctToBattleAttrs(freshBossCT) });
+      setActiveEffects([]);
+      setCurrentTeam('team2');
+      setPhase('play');
+      setTimeLeft(0);
+      addSystem('Kael’Zor começa. O Fragmento Selado do Vazio analisa o campo antes dos shinobi.');
+      return;
+    }
+    setBattleAttrs({ team1: ctToBattleAttrs(initCT1), team2: ctToBattleAttrs(initCT2!) });
     setActiveEffects([]);
     const r1 = RANK_ORDER[initCT1.rank];
-    const r2 = RANK_ORDER[initCT2.rank];
+    const r2 = RANK_ORDER[initCT2!.rank];
     let starter: Team;
     if (r1 !== r2) starter = r1 > r2 ? 'team1' : 'team2';
     else {
-      const a1 = initCT1.attrs.Ag ?? 0; const a2 = initCT2.attrs.Ag ?? 0;
+      const a1 = initCT1.attrs.Ag ?? 0; const a2 = initCT2!.attrs.Ag ?? 0;
       if (a1 !== a2) starter = a1 > a2 ? 'team1' : 'team2';
       else starter = Math.random() < 0.5 ? 'team1' : 'team2';
     }
@@ -131,11 +154,77 @@ export default function Battle() {
       id: uid(), turn, team: currentTeam, timestamp: Date.now(),
       playedCards: played, ctSnapshot: ctSnap, activeEntitySnapshot: activeEntity, ctObservation: observation, finalAttrs, finalEntityAttrs, momentaryActions,
     };
+    if (isBoss && currentTeam === 'team1') {
+      const defense = resolveBossDefense(bossState, played, observation, finalAttrs, momentaryActions);
+      lastBossAnalysisRef.current = defense.analysis;
+      const nextBossCT = createBossCT(defense.boss);
+      const defenseMsg: ChatMsg = { id: uid(), turn, team: 'system', text: defense.lines.join('\n'), timestamp: Date.now() };
+      registerPersistentEffects(played.map(p => p.cardSnapshot), keptActiveEffectIds);
+      setBossState(defense.boss);
+      setBattleAttrs((attrs) => ({ ...attrs, team1: finalAttrs, team2: ctToBattleAttrs(nextBossCT) }));
+      if (defense.defeated) {
+        const finalText = 'Kael’Zor foi derrotado. Os selos do Abismo Vermelho foram estabilizados.';
+        setPhase('ended');
+        setResult(finalText);
+        setMessages((m) => {
+          const next = [...m, msg, defenseMsg, { id: uid(), turn, team: 'system' as const, text: finalText, timestamp: Date.now() }];
+          Storage.appendHistory({
+            id: uid(), endedAt: Date.now(), result: finalText, messages: next,
+            config: { matchType: matchType as MatchType, turnMinutes: null, startedAt: Date.now(), bossDifficulty: difficulty },
+          });
+          return next;
+        });
+        return;
+      }
+      setMessages((m) => [...m, msg, defenseMsg]);
+      advanceTurn();
+      return;
+    }
     setBattleAttrs((attrs) => ({ ...attrs, [currentTeam]: finalAttrs }));
     registerPersistentEffects(played.map(p => p.cardSnapshot), keptActiveEffectIds);
     setMessages((m) => [...m, msg]);
     advanceTurn();
   };
+
+  const runBossTurn = () => {
+    if (!initCT1 || phase !== 'play') return;
+    const playerCT = { ...initCT1, attrs: battleAttrs.team1 as Record<Attr, number> };
+    const attack = resolveBossAttack(bossState, playerCT, battleAttrs.team1, lastBossAnalysisRef.current);
+    const nextBossCT = createBossCT(attack.boss);
+    setBossState(attack.boss);
+    setBattleAttrs((attrs) => ({ ...attrs, team1: attack.playerAttrs, team2: ctToBattleAttrs(nextBossCT) }));
+    const bossMsg: ChatMsg = { id: uid(), turn, team: 'team2', text: attack.lines.join('\n'), timestamp: Date.now(), ctSnapshot: nextBossCT, finalAttrs: ctToBattleAttrs(nextBossCT) };
+    if (attack.defeatedPlayer) {
+      const finalText = 'Kael’Zor venceu após validar dano e alvo atingido.';
+      setPhase('ended');
+      setResult(finalText);
+      setMessages((m) => {
+        const next = [...m, bossMsg, { id: uid(), turn, team: 'system' as const, text: finalText, timestamp: Date.now() }];
+        Storage.appendHistory({
+          id: uid(), endedAt: Date.now(), result: finalText, messages: next,
+          config: { matchType: matchType as MatchType, turnMinutes: null, startedAt: Date.now(), bossDifficulty: difficulty },
+        });
+        return next;
+      });
+      return;
+    }
+    setMessages((m) => [...m, bossMsg]);
+    advanceTurn();
+  };
+
+  useEffect(() => {
+    if (!isBoss || phase !== 'play' || currentTeam !== 'team2' || bossBusyRef.current) return;
+    bossBusyRef.current = true;
+    const timer = setTimeout(() => {
+      runBossTurn();
+      bossBusyRef.current = false;
+    }, 900);
+    return () => {
+      clearTimeout(timer);
+      bossBusyRef.current = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBoss, phase, currentTeam, turn]);
 
   const registerPersistentEffects = (playedCards: Card[], keptActiveEffectIds: string[]) => {
     const persistent = playedCards.filter(card => card.durationType && card.durationType !== 'instantâneo');
@@ -225,7 +314,16 @@ export default function Battle() {
         ) : (
           <>
             <CTSelector label="Time 1 — O C.T inicial" cts={cts} value={initCT1} onChange={setInitCT1} testID="select-ct1" />
-            <CTSelector label={`${t2Label} — O C.T inicial`} cts={cts} value={initCT2} onChange={setInitCT2} testID="select-ct2" />
+            {isBoss ? (
+              <View style={styles.bossInitCard}>
+                <Text style={styles.cardName}>Kael’Zor — Fragmento Selado do Vazio</Text>
+                <Text style={styles.obs}>Rank B • Fácil • ENE: {formatNumberBR(bossState.stats.Ene)}</Text>
+                <Text style={styles.obs}>HP {formatNumberBR(bossState.stats.Hp)} • ATK {formatNumberBR(bossState.stats.Atk)} • DEF {formatNumberBR(bossState.stats.Def)} • AG {formatNumberBR(bossState.stats.Ag)}</Text>
+                <Text style={styles.obs}>Boss automático simples por regras: analisa Speed, dano, texto, clones/alvos e não aceita morte declarada sem cálculo.</Text>
+              </View>
+            ) : (
+              <CTSelector label={`${t2Label} — O C.T inicial`} cts={cts} value={initCT2} onChange={setInitCT2} testID="select-ct2" />
+            )}
             <Button title="Iniciar batalha" onPress={startPresentation} testID="start-presentation-btn" style={{ marginTop: 16 }} />
           </>
         )}
@@ -265,12 +363,18 @@ export default function Battle() {
             <Input label="Chat local" value={localChatText} onChangeText={setLocalChatText} placeholder="Mensagem de teste" testID="local-chat-input" style={{ minHeight: 42 }} />
             <Button title="Enviar" onPress={sendLocalChat} testID="local-chat-send" small />
           </View>
-          <View style={styles.actionBar}>
-            <Button title="Jogar" onPress={() => setPickerVisible(true)} testID="play-btn" style={{ flex: 1 }} small />
-            <Button title="Morte" variant="danger" onPress={declareDeath} testID="death-btn" small />
-            <Button title="Passar" variant="ghost" onPress={passTurn} testID="pass-btn" small />
-            <Button title="Desistir" variant="danger" onPress={giveUp} testID="give-up-btn" small />
-          </View>
+          {isAutoBossTurn ? (
+            <View style={styles.actionBar}>
+              <Text style={styles.bossThinking}>Kael’Zor está escolhendo a resposta...</Text>
+            </View>
+          ) : (
+            <View style={styles.actionBar}>
+              <Button title="Jogar" onPress={() => setPickerVisible(true)} testID="play-btn" style={{ flex: 1 }} small />
+              <Button title="Morte" variant="danger" onPress={declareDeath} testID="death-btn" small />
+              <Button title="Passar" variant="ghost" onPress={passTurn} testID="pass-btn" small />
+              <Button title="Desistir" variant="danger" onPress={giveUp} testID="give-up-btn" small />
+            </View>
+          )}
         </>
       ) : (
         <View style={styles.endedBar}>
@@ -834,6 +938,8 @@ const styles = StyleSheet.create({
   ctImgFallback: { alignItems: 'center', justifyContent: 'center' },
   ctName: { color: '#fff', fontSize: 13, fontWeight: '800' },
   ctRank: { color: theme.colors.neon, fontSize: 11, fontWeight: '700' },
+  bossInitCard: { backgroundColor: 'rgba(255,59,0,0.08)', borderWidth: 1, borderColor: theme.colors.borderActive, borderRadius: theme.radius.lg, padding: 14, gap: 6, marginBottom: 16 },
+  bossThinking: { color: theme.colors.neon, fontSize: 13, fontWeight: '900', textAlign: 'center', flex: 1, paddingVertical: 10 },
 
   systemRow: { alignItems: 'center', marginVertical: 4 },
   systemText: { color: theme.colors.textMuted, fontSize: 11, fontStyle: 'italic', backgroundColor: 'rgba(255,255,255,0.04)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },

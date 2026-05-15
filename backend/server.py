@@ -68,6 +68,21 @@ async def get_status_checks():
 
 class RoomCreatePayload(BaseModel):
     turnMinutes: int = 20
+    matchType: str = "1x1"
+    bossMode: bool = False
+
+
+def _max_players_for(match_type: str, boss_mode: bool = False) -> int:
+    if boss_mode or "Boss" in match_type:
+        try:
+            return max(1, min(3, int(match_type.split("x", 1)[0])))
+        except Exception:
+            return 3
+    try:
+        left, right = match_type.split("x", 1)
+        return max(2, min(6, int(left) + int(right)))
+    except Exception:
+        return 2
 
 class Room:
     def __init__(self, code: str, config: Dict[str, Any]):
@@ -77,9 +92,12 @@ class Room:
         self.guest_ws: Optional[WebSocket] = None
         self.host_info: Optional[Dict[str, Any]] = None
         self.guest_info: Optional[Dict[str, Any]] = None
+        self.participants: Dict[str, Dict[str, Any]] = {}
         self.created_at = datetime.now(timezone.utc).timestamp()
 
     def is_full(self) -> bool:
+        if self.config.get("teamMode"):
+            return len(self.participants) >= int(self.config.get("maxPlayers", 2))
         return self.host_ws is not None and self.guest_ws is not None
 
     def opponent_ws(self, role: str) -> Optional[WebSocket]:
@@ -87,6 +105,19 @@ class Room:
 
     def opponent_info(self, role: str) -> Optional[Dict[str, Any]]:
         return self.guest_info if role == "host" else self.host_info
+
+    def participants_info(self) -> List[Dict[str, Any]]:
+        return [p.get("player", {}) for p in self.participants.values()]
+
+    def participant_sockets(self, except_id: Optional[str] = None) -> List[WebSocket]:
+        sockets: List[WebSocket] = []
+        for pid, entry in self.participants.items():
+            if pid == except_id:
+                continue
+            ws = entry.get("ws")
+            if ws is not None:
+                sockets.append(ws)
+        return sockets
 
 
 ROOMS: Dict[str, Room] = {}
@@ -107,15 +138,25 @@ def _generate_code() -> str:
 async def create_room(payload: RoomCreatePayload):
     if payload.turnMinutes not in (0, 10, 20, 30):
         raise HTTPException(status_code=400, detail="turnMinutes must be 0, 10, 20 or 30")
+    allowed_matches = {"1x1", "1x2", "2x2", "2x3", "3x1", "3x2", "3x3", "1xBoss", "2xBoss", "3xBoss"}
+    if payload.matchType not in allowed_matches:
+        raise HTTPException(status_code=400, detail="matchType inválido")
+    team_mode = payload.matchType != "1x1" or payload.bossMode or "Boss" in payload.matchType
     async with ROOMS_LOCK:
         # cleanup very old empty rooms (>1h)
         now = datetime.now(timezone.utc).timestamp()
         for code in list(ROOMS.keys()):
             r = ROOMS[code]
-            if r.host_ws is None and r.guest_ws is None and now - r.created_at > 3600:
+            if r.host_ws is None and r.guest_ws is None and len(r.participants) == 0 and now - r.created_at > 3600:
                 del ROOMS[code]
         code = _generate_code()
-        ROOMS[code] = Room(code, {"turnMinutes": payload.turnMinutes})
+        ROOMS[code] = Room(code, {
+            "turnMinutes": payload.turnMinutes,
+            "matchType": payload.matchType,
+            "bossMode": payload.bossMode,
+            "teamMode": team_mode,
+            "maxPlayers": _max_players_for(payload.matchType, payload.bossMode),
+        })
     return {"code": code, "config": ROOMS[code].config}
 
 
@@ -130,6 +171,7 @@ async def get_room(code: str):
         "config": room.config,
         "hasHost": room.host_ws is not None,
         "hasGuest": room.guest_ws is not None,
+        "participants": room.participants_info(),
         "full": room.is_full(),
     }
 
@@ -148,6 +190,7 @@ async def room_ws(websocket: WebSocket, code: str):
     await websocket.accept()
     code = code.upper().strip()
     role: Optional[str] = None
+    participant_id: Optional[str] = None
     try:
         # First message MUST be a hello with role + player info
         raw = await websocket.receive_text()
@@ -159,7 +202,7 @@ async def room_ws(websocket: WebSocket, code: str):
 
         requested_role = msg.get("role")
         player = msg.get("player") or {}
-        if requested_role not in ("host", "guest"):
+        if requested_role not in ("host", "guest", "player"):
             await _safe_send(websocket, {"type": "error", "message": "Role inválido."})
             await websocket.close()
             return
@@ -170,7 +213,17 @@ async def room_ws(websocket: WebSocket, code: str):
                 await _safe_send(websocket, {"type": "error", "code": "not_found", "message": "Sala não encontrada."})
                 await websocket.close()
                 return
-            if requested_role == "host":
+            if requested_role == "player" or room.config.get("teamMode"):
+                pid = str(player.get("id") or uuid.uuid4())
+                if pid not in room.participants and room.is_full():
+                    await _safe_send(websocket, {"type": "error", "code": "full", "message": "Sala cheia."})
+                    await websocket.close()
+                    return
+                player["id"] = pid
+                room.participants[pid] = {"ws": websocket, "player": player}
+                role = "player"
+                participant_id = pid
+            elif requested_role == "host":
                 if room.host_ws is not None:
                     await _safe_send(websocket, {"type": "error", "code": "full", "message": "Sala cheia."})
                     await websocket.close()
@@ -187,22 +240,38 @@ async def room_ws(websocket: WebSocket, code: str):
                 room.guest_info = player
                 role = "guest"
 
-        # Send "ready" to this socket with opponent info (if any)
-        await _safe_send(websocket, {
-            "type": "ready",
-            "you": role,
-            "code": code,
-            "config": room.config,
-            "opponent": room.opponent_info(role),
-        })
-        # Notify opponent
-        opp = room.opponent_ws(role)
-        if opp is not None:
-            await _safe_send(opp, {
-                "type": "opponent_joined",
-                "opponent": player,
+        if role == "player":
+            await _safe_send(websocket, {
+                "type": "team_ready",
+                "you": participant_id,
+                "code": code,
                 "config": room.config,
+                "participants": room.participants_info(),
             })
+            for ws in room.participant_sockets(participant_id):
+                await _safe_send(ws, {
+                    "type": "participant_joined",
+                    "participant": player,
+                    "participants": room.participants_info(),
+                    "config": room.config,
+                })
+        else:
+            # Send "ready" to this socket with opponent info (if any)
+            await _safe_send(websocket, {
+                "type": "ready",
+                "you": role,
+                "code": code,
+                "config": room.config,
+                "opponent": room.opponent_info(role),
+            })
+            # Notify opponent
+            opp = room.opponent_ws(role)
+            if opp is not None:
+                await _safe_send(opp, {
+                    "type": "opponent_joined",
+                    "opponent": player,
+                    "config": room.config,
+                })
 
         # Relay loop
         while True:
@@ -213,11 +282,19 @@ async def room_ws(websocket: WebSocket, code: str):
                 continue
             mtype = data.get("type")
             if mtype == "relay":
-                await _safe_send(room.opponent_ws(role), {
-                    "type": "relay",
-                    "from": role,
-                    "payload": data.get("payload"),
-                })
+                if role == "player":
+                    for ws in room.participant_sockets(participant_id):
+                        await _safe_send(ws, {
+                            "type": "team_relay",
+                            "from": participant_id,
+                            "payload": data.get("payload"),
+                        })
+                else:
+                    await _safe_send(room.opponent_ws(role), {
+                        "type": "relay",
+                        "from": role,
+                        "payload": data.get("payload"),
+                    })
             elif mtype == "ping":
                 await _safe_send(websocket, {"type": "pong"})
 
@@ -230,7 +307,11 @@ async def room_ws(websocket: WebSocket, code: str):
         async with ROOMS_LOCK:
             room = ROOMS.get(code)
             if room and role:
-                if role == "host" and room.host_ws is websocket:
+                if role == "player" and participant_id:
+                    room.participants.pop(participant_id, None)
+                    for ws in room.participant_sockets(None):
+                        await _safe_send(ws, {"type": "participant_left", "id": participant_id, "participants": room.participants_info()})
+                elif role == "host" and room.host_ws is websocket:
                     room.host_ws = None
                     room.host_info = None
                 elif role == "guest" and room.guest_ws is websocket:
@@ -240,7 +321,7 @@ async def room_ws(websocket: WebSocket, code: str):
                 if opp is not None:
                     await _safe_send(opp, {"type": "opponent_disconnected"})
                 # If both gone, delete room
-                if room.host_ws is None and room.guest_ws is None:
+                if room.host_ws is None and room.guest_ws is None and len(room.participants) == 0:
                     ROOMS.pop(code, None)
 
 

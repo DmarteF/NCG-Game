@@ -10,33 +10,52 @@ import { apiCheckRoom, apiCreateRoom } from '../src/online';
 import { Storage } from '../src/storage';
 import { Header } from './profile';
 import { Ionicons } from '@expo/vector-icons';
+import { MatchType } from '../src/types';
 
 const TIMES = [10, 20, 30];
+const ONLINE_MATCHES: MatchType[] = ['1x1', '1x2', '2x2', '2x3', '3x3'];
 
 export default function OnlineLobby() {
   const router = useRouter();
   const [mode, setMode] = useState<'home' | 'create' | 'join'>('home');
   const [turnMinutes, setTurnMinutes] = useState(20);
+  const [matchType, setMatchType] = useState<MatchType>('1x1');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [errMsg, setErrMsg] = useState('');
 
-  const goWithProfile = async (role: 'host' | 'guest', roomCode: string, turn: number) => {
+  const goWithProfile = async (role: 'host' | 'guest', roomCode: string, turn: number, roomMatch: MatchType = '1x1', team: 'team1' | 'team2' = 'team1') => {
     const p = await Storage.getProfile();
     const player = {
       name: (p?.name || 'Jogador').trim(),
       village: p?.village || '—',
       image: p?.image,
     };
+    if (roomMatch === '1x1') {
+      router.replace({
+        pathname: '/online-battle',
+        params: {
+          role,
+          code: roomCode,
+          turnMinutes: String(turn),
+          playerName: player.name,
+          playerVillage: player.village,
+          playerImage: player.image || '',
+        },
+      });
+      return;
+    }
     router.replace({
-      pathname: '/online-battle',
+      pathname: '/team-online-battle',
       params: {
-        role,
         code: roomCode,
+        matchType: roomMatch,
         turnMinutes: String(turn),
         playerName: player.name,
         playerVillage: player.village,
         playerImage: player.image || '',
+        team,
+        leader: role === 'host' ? '1' : '0',
       },
     });
   };
@@ -45,9 +64,9 @@ export default function OnlineLobby() {
     setErrMsg('');
     try {
       setBusy(true);
-      const res = await apiCreateRoom(turnMinutes);
+      const res = await apiCreateRoom(turnMinutes, { matchType });
       setBusy(false);
-      await goWithProfile('host', res.code, turnMinutes);
+      await goWithProfile('host', res.code, turnMinutes, matchType, 'team1');
     } catch (e: any) {
       setBusy(false);
       const m = e?.message || 'Não foi possível criar a sala.';
@@ -65,7 +84,15 @@ export default function OnlineLobby() {
       const info = await apiCheckRoom(c);
       setBusy(false);
       if (info.full) { setErrMsg('Sala cheia.'); return Alert.alert('Sala cheia', 'Esta sala já está cheia.'); }
-      await goWithProfile('guest', c, info.config?.turnMinutes ?? 20);
+      const roomMatch = (info.config?.matchType || '1x1') as MatchType;
+      const team = roomMatch === '1x1'
+        ? 'team2'
+        : roomMatch === '1x2'
+          ? 'team2'
+          : (info.participants || []).filter(p => p.team === 'team1').length <= (info.participants || []).filter(p => p.team === 'team2').length
+            ? 'team1'
+            : 'team2';
+      await goWithProfile('guest', c, info.config?.turnMinutes ?? 20, roomMatch, team);
     } catch (e: any) {
       setBusy(false);
       const m = e?.message || 'Sala não encontrada.';
@@ -80,7 +107,7 @@ export default function OnlineLobby() {
 
       <View style={styles.banner}>
         <Ionicons name="globe-outline" size={20} color={theme.colors.neon} />
-        <Text style={styles.bannerText}>Multiplayer 1x1 — beta</Text>
+        <Text style={styles.bannerText}>Multiplayer online — beta</Text>
       </View>
 
       {mode === 'home' && (
@@ -88,13 +115,21 @@ export default function OnlineLobby() {
           <Button title="Criar Sala" onPress={() => setMode('create')} testID="online-create-mode-btn" />
           <Button title="Entrar em Sala" variant="secondary" onPress={() => setMode('join')} testID="online-join-mode-btn" />
           <Text style={styles.hint}>
-            Outros modos (1x2, 2x2, 3x3, Boss) serão liberados futuramente.
+            1x1 usa o fluxo clássico. Equipes usam sala multi-jogador com relay, chat, cooldown e turnos por equipe.
           </Text>
         </View>
       )}
 
       {mode === 'create' && (
         <View style={{ marginTop: 8 }}>
+          <Text style={styles.label}>Tempo por turno (host)</Text>
+          <Text style={styles.label}>Tipo de luta</Text>
+          <View style={styles.row}>
+            {ONLINE_MATCHES.map(t => (
+              <Chip key={t} label={t} active={t === matchType} onPress={() => setMatchType(t)} testID={`online-match-${t}`} />
+            ))}
+          </View>
+          <View style={{ height: 12 }} />
           <Text style={styles.label}>Tempo por turno (host)</Text>
           <View style={styles.row}>
             {TIMES.map(t => (

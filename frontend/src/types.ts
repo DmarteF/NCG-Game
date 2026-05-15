@@ -60,7 +60,7 @@ export type CT = {
 };
 
 export type MatchType =
-  | '1x1' | '1x2' | '2x2' | '3x1' | '3x2' | '3x3'
+  | '1x1' | '1x2' | '2x2' | '2x3' | '3x1' | '3x2' | '3x3'
   | '1xBoss' | '2xBoss' | '3xBoss';
 
 export type BattleConfig = {
