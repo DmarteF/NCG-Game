@@ -54,7 +54,7 @@ export default function Home() {
         />
       </View>
 
-      <Text style={styles.footer}>v1.0 Prototype</Text>
+      <Text style={styles.footer}>Beta 2.0</Text>
     </Screen>
   );
 }
