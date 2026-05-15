@@ -6,6 +6,7 @@ import Screen from '../src/components/Screen';
 import Button from '../src/components/Button';
 import Input from '../src/components/Input';
 import Chip from '../src/components/Chip';
+import ZoomableImageModal from '../src/components/ZoomableImageModal';
 import { Storage, uid } from '../src/storage';
 import { BattleEntity, Card, CT, MomentaryAction, PlayedCard } from '../src/types';
 import { ATTRS, CT_ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CardRank, Rank } from '../src/theme';
@@ -406,9 +407,9 @@ export default function OnlineBattle() {
         cards={cards}
         activeCT={myInitialCT}
         onImagePress={setZoomImage}
-        onConfirm={(played, ctSnap, obs, finalAttrs, activeEntity) => { setPickerVisible(false); sendPlay(played, ctSnap, obs, finalAttrs, activeEntity); }}
+        onConfirm={(played, ctSnap, obs, finalAttrs, activeEntity, finalEntityAttrs, momentaryActions) => { setPickerVisible(false); sendPlay(played, ctSnap, obs, finalAttrs, activeEntity, finalEntityAttrs, momentaryActions); }}
       />
-      <ImageZoomModal uri={zoomImage} onClose={() => setZoomImage(null)} />
+      <ZoomableImageModal uri={zoomImage} onClose={() => setZoomImage(null)} />
     </Screen>
   );
 }
@@ -533,20 +534,6 @@ function ZoomableThumb({ uri, onPress }: { uri?: string; onPress: (uri: string) 
     <Pressable onPress={() => onPress(uri)} hitSlop={8}>
       <Image source={{ uri }} style={styles.cardThumb} />
     </Pressable>
-  );
-}
-
-function ImageZoomModal({ uri, onClose }: { uri: string | null; onClose: () => void }) {
-  return (
-    <Modal visible={!!uri} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.zoomWrap}>
-        <Pressable onPress={onClose} style={styles.zoomClose}><Ionicons name="close" size={24} color="#fff" /></Pressable>
-        <ScrollView style={{ flex: 1, alignSelf: 'stretch' }} contentContainerStyle={styles.zoomContent} maximumZoomScale={4} minimumZoomScale={1} centerContent>
-          {uri ? <Image source={{ uri }} style={styles.zoomImage} resizeMode="contain" /> : null}
-        </ScrollView>
-        <Pressable onPress={onClose} style={styles.zoomTapClose}><Text style={styles.zoomTapCloseText}>Fechar</Text></Pressable>
-      </View>
-    </Modal>
   );
 }
 

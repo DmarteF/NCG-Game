@@ -99,7 +99,7 @@ export default function CardEdit() {
       <Header title={id ? 'Editar Card' : 'Novo Card'} onBack={() => router.back()} />
 
       <View style={{ alignItems: 'center', marginBottom: 16 }}>
-        <ImagePickerField value={image} onChange={setImage} label="Imagem do Card" size={140} testID="card-image-picker" />
+        <ImagePickerField value={image} onChange={setImage} label="Imagem do Card" size={180} testID="card-image-picker" />
       </View>
 
       <Input label="Nome do Card" value={name} onChangeText={setName} placeholder="Ex: Rasengan" testID="card-name-input" />

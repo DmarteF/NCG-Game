@@ -53,7 +53,7 @@ export default function CTEdit() {
       <Header title={id ? 'Editar O C.T' : 'Novo O C.T'} onBack={() => router.back()} />
 
       <View style={{ alignItems: 'center', marginBottom: 16 }}>
-        <ImagePickerField value={image} onChange={setImage} label="Imagem do O C.T" size={140} testID="ct-image-picker" />
+        <ImagePickerField value={image} onChange={setImage} label="Imagem do O C.T" size={180} testID="ct-image-picker" />
       </View>
 
       <Input label="Nome do O C.T (opcional)" value={name} onChangeText={setName} placeholder={`O C.T Rank ${rank}`} testID="ct-name-input" />

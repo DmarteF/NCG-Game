@@ -11,6 +11,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../theme';
+import ZoomableImageModal from './ZoomableImageModal';
 
 type Props = {
   value?: string;
@@ -26,10 +27,11 @@ export default function ImagePickerField({
   onChange,
   label,
   shape = 'rect',
-  size = 140,
+  size = 160,
   testID,
 }: Props) {
   const [loading, setLoading] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   async function pickImage() {
     try {
@@ -108,6 +110,7 @@ export default function ImagePickerField({
 
       <Pressable
         onPress={pickImage}
+        onLongPress={() => value && setPreviewOpen(true)}
         disabled={loading}
         testID={testID}
         style={({ pressed }) => [
@@ -131,7 +134,7 @@ export default function ImagePickerField({
               height: '100%',
               borderRadius: radius,
             }}
-            resizeMode="cover"
+            resizeMode={shape === 'circle' ? 'cover' : 'contain'}
           />
         ) : (
           <View
@@ -156,6 +159,16 @@ export default function ImagePickerField({
       </Pressable>
 
       {value ? (
+        <>
+          <Pressable onPress={() => setPreviewOpen(true)} style={styles.previewBtn} testID={`${testID || 'image'}-preview-btn`}>
+            <Ionicons name="search" size={14} color="#fff" />
+            <Text style={styles.previewText}>Ver imagem</Text>
+          </Pressable>
+          <Text style={styles.previewHint}>Toque para trocar. Segure ou use a lupa para ampliar.</Text>
+        </>
+      ) : null}
+
+      {value ? (
         <Pressable
           onPress={() =>
             onChange(undefined)
@@ -166,6 +179,7 @@ export default function ImagePickerField({
           </Text>
         </Pressable>
       ) : null}
+      <ZoomableImageModal uri={previewOpen ? value || null : null} onClose={() => setPreviewOpen(false)} />
     </View>
   );
 }
@@ -199,4 +213,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  previewBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,59,0,0.18)',
+    borderWidth: 1,
+    borderColor: theme.colors.borderActive,
+  },
+  previewText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  previewHint: { color: theme.colors.textMuted, fontSize: 11, textAlign: 'center' },
 });

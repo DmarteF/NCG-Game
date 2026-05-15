@@ -6,6 +6,7 @@ import Screen from '../src/components/Screen';
 import Button from '../src/components/Button';
 import Input from '../src/components/Input';
 import Chip from '../src/components/Chip';
+import ZoomableImageModal from '../src/components/ZoomableImageModal';
 import { Storage, uid } from '../src/storage';
 import { BattleEntity, Card, CT, ChatMsg, MatchType, MomentaryAction, PlayedCard } from '../src/types';
 import { ATTRS, CT_ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CardRank, Rank } from '../src/theme';
@@ -35,6 +36,7 @@ export default function Battle() {
   const [timeLeft, setTimeLeft] = useState(turnSeconds);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [zoomImage, setZoomImage] = useState<string | null>(null);
+  const [localChatText, setLocalChatText] = useState('');
   const [result, setResult] = useState<string>('');
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -122,6 +124,13 @@ export default function Battle() {
     advanceTurn();
   };
 
+  const sendLocalChat = () => {
+    const text = localChatText.trim();
+    if (!text) return;
+    setMessages((m) => [...m, { id: uid(), turn, team: currentTeam, text, timestamp: Date.now() }]);
+    setLocalChatText('');
+  };
+
   const advanceTurn = () => {
     const newT1 = currentTeam === 'team1' ? true : t1Played;
     const newT2 = currentTeam === 'team2' ? true : t2Played;
@@ -195,12 +204,18 @@ export default function Battle() {
       />
 
       {phase === 'play' ? (
-        <View style={styles.actionBar}>
-          <Button title="Jogar" onPress={() => setPickerVisible(true)} testID="play-btn" style={{ flex: 1 }} small />
-          <Button title="Morte" variant="danger" onPress={declareDeath} testID="death-btn" small />
-          <Button title="Passar" variant="ghost" onPress={passTurn} testID="pass-btn" small />
-          <Button title="Desistir" variant="danger" onPress={giveUp} testID="give-up-btn" small />
-        </View>
+        <>
+          <View style={styles.chatBar}>
+            <Input label="Chat local" value={localChatText} onChangeText={setLocalChatText} placeholder="Mensagem de teste" testID="local-chat-input" style={{ minHeight: 42 }} />
+            <Button title="Enviar" onPress={sendLocalChat} testID="local-chat-send" small />
+          </View>
+          <View style={styles.actionBar}>
+            <Button title="Jogar" onPress={() => setPickerVisible(true)} testID="play-btn" style={{ flex: 1 }} small />
+            <Button title="Morte" variant="danger" onPress={declareDeath} testID="death-btn" small />
+            <Button title="Passar" variant="ghost" onPress={passTurn} testID="pass-btn" small />
+            <Button title="Desistir" variant="danger" onPress={giveUp} testID="give-up-btn" small />
+          </View>
+        </>
       ) : (
         <View style={styles.endedBar}>
           <Text style={styles.endedText}>{result}</Text>
@@ -217,12 +232,12 @@ export default function Battle() {
         cards={cards}
         activeCT={currentTeam === 'team1' ? initCT1 : initCT2}
         onImagePress={setZoomImage}
-        onConfirm={(played, ctSnap, obs, finalAttrs, activeEntity) => {
+        onConfirm={(played, ctSnap, obs, finalAttrs, activeEntity, finalEntityAttrs, momentaryActions) => {
           setPickerVisible(false);
-          onSendPlay(played, ctSnap, obs, finalAttrs, activeEntity);
+          onSendPlay(played, ctSnap, obs, finalAttrs, activeEntity, finalEntityAttrs, momentaryActions);
         }}
       />
-      <ImageZoomModal uri={zoomImage} onClose={() => setZoomImage(null)} />
+      <ZoomableImageModal uri={zoomImage} onClose={() => setZoomImage(null)} />
     </Screen>
   );
 }
@@ -270,6 +285,7 @@ function ChatBubble({ msg, t2Label, onImagePress }: { msg: ChatMsg; t2Label: str
     <View style={[styles.bubbleRow, { justifyContent: isT1 ? 'flex-end' : 'flex-start' }]}>
       <View style={[styles.bubble, isT1 ? styles.bubbleT1 : styles.bubbleT2]}>
         <Text style={styles.bubbleHeader}>Turno {msg.turn} • {isT1 ? 'Time 1' : t2Label}</Text>
+        {msg.text ? <Text style={styles.chatText}>{msg.text}</Text> : null}
 
         {msg.playedCards?.map((p, idx) => (
           <View key={idx} style={styles.playedCard}>
@@ -357,26 +373,6 @@ function ZoomableThumb({ uri, onPress }: { uri?: string; onPress: (uri: string) 
     <Pressable onPress={() => onPress(uri)} hitSlop={8}>
       <Image source={{ uri }} style={styles.cardThumb} />
     </Pressable>
-  );
-}
-
-function ImageZoomModal({ uri, onClose }: { uri: string | null; onClose: () => void }) {
-  return (
-    <Modal visible={!!uri} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.zoomWrap}>
-        <Pressable onPress={onClose} style={styles.zoomClose}><Ionicons name="close" size={24} color="#fff" /></Pressable>
-        <ScrollView
-          style={{ flex: 1, alignSelf: 'stretch' }}
-          contentContainerStyle={styles.zoomContent}
-          maximumZoomScale={4}
-          minimumZoomScale={1}
-          centerContent
-        >
-          {uri ? <Image source={{ uri }} style={styles.zoomImage} resizeMode="contain" /> : null}
-        </ScrollView>
-        <Pressable onPress={onClose} style={styles.zoomTapClose}><Text style={styles.zoomTapCloseText}>Fechar</Text></Pressable>
-      </View>
-    </Modal>
   );
 }
 
@@ -663,6 +659,7 @@ const styles = StyleSheet.create({
   bubbleT1: { backgroundColor: 'rgba(255,59,0,0.14)', borderColor: 'rgba(255,59,0,0.3)', borderTopRightRadius: 4 },
   bubbleT2: { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)', borderTopLeftRadius: 4 },
   bubbleHeader: { color: theme.colors.neon, fontSize: 10, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 },
+  chatText: { color: '#fff', fontSize: 13, lineHeight: 18 },
   playedCard: { backgroundColor: 'rgba(0,0,0,0.25)', padding: 8, borderRadius: 10, marginVertical: 4, gap: 4 },
   cardThumb: { width: 36, height: 36, borderRadius: 8, backgroundColor: theme.colors.bg },
   cardThumbFb: { borderWidth: 1, borderColor: theme.colors.border },
@@ -675,6 +672,7 @@ const styles = StyleSheet.create({
   obs: { color: theme.colors.textSecondary, fontStyle: 'italic', fontSize: 12, marginTop: 4 },
   time: { color: theme.colors.textMuted, fontSize: 10, marginTop: 4, textAlign: 'right' },
 
+  chatBar: { paddingTop: 8, borderTopWidth: 1, borderColor: theme.colors.border, gap: 8 },
   actionBar: { flexDirection: 'row', gap: 6, paddingTop: 8, borderTopWidth: 1, borderColor: theme.colors.border, flexWrap: 'wrap' },
   endedBar: { gap: 10, paddingTop: 12, borderTopWidth: 1, borderColor: theme.colors.border, alignItems: 'center' },
   endedText: { color: '#fff', fontWeight: '900', fontSize: 14, textAlign: 'center' },
