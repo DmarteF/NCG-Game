@@ -7,7 +7,7 @@ import Input from '../src/components/Input';
 import ImagePickerField from '../src/components/ImagePickerField';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
-import { Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType, CardType, DurationType, CardSpeed } from '../src/types';
+import { Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType, CardType, DurationType, CardSpeed, MovementRange, MovementType, DiverseSummonType, TargetShape } from '../src/types';
 import { ATTRS, Attr, theme, CARD_RANKS, CardRank } from '../src/theme';
 import { Header } from './profile';
 import { formatNumberBR } from '../src/format';
@@ -22,9 +22,11 @@ const EFFECTS: { id: CardEffect; label: string }[] = [
 const ENTITY_TYPES: EntityType[] = ['invocação', 'marionete', 'edo tensei'];
 const CARD_TYPES: { id: CardType; label: string }[] = [
   { id: 'técnica', label: 'Técnica' },
+  { id: 'movimentação', label: 'Movimentação' },
   { id: 'modo/buff', label: 'Modo/buff' },
   { id: 'arma/equipamento', label: 'Arma/equip.' },
   { id: 'invocação', label: 'Invocação' },
+  { id: 'invocação diversa', label: 'Invocação diversa' },
   { id: 'edo tensei', label: 'Edo tensei' },
   { id: 'marionete', label: 'Marionete' },
 ];
@@ -40,6 +42,40 @@ const ACTION_TYPES: { id: CardActionType; label: string }[] = [
   { id: 'equipment', label: 'Arma/equip.' },
   { id: 'mode', label: 'Modo' },
   { id: 'entity', label: 'Invocação' },
+  { id: 'movement', label: 'Movimentação' },
+  { id: 'diverse_summon', label: 'Invocação diversa' },
+];
+const MOVEMENT_RANGES: { id: MovementRange; label: string }[] = [
+  { id: 'curto', label: 'Curto' },
+  { id: 'médio', label: 'Médio' },
+  { id: 'longo', label: 'Longo' },
+  { id: 'global/dimensional', label: 'Global/dimensional' },
+];
+const MOVEMENT_TYPES: { id: MovementType; label: string }[] = [
+  { id: 'avanço', label: 'Avanço' },
+  { id: 'recuo', label: 'Recuo' },
+  { id: 'esquiva', label: 'Esquiva' },
+  { id: 'aproximação', label: 'Aproximação' },
+  { id: 'reposicionamento', label: 'Reposicionamento' },
+  { id: 'voo', label: 'Voo' },
+  { id: 'teleporte', label: 'Teleporte' },
+  { id: 'deslocamento dimensional', label: 'Deslocamento dimensional' },
+];
+const DIVERSE_SUMMON_TYPES: { id: DiverseSummonType; label: string }[] = [
+  { id: 'clone', label: 'Clone' },
+  { id: 'grupo', label: 'Grupo' },
+  { id: 'enxame', label: 'Enxame' },
+  { id: 'constructo', label: 'Constructo' },
+  { id: 'invocação menor', label: 'Invocação menor' },
+  { id: 'objeto invocado', label: 'Objeto invocado' },
+];
+const TARGET_SHAPES: { id: TargetShape; label: string }[] = [
+  { id: 'único', label: 'Único' },
+  { id: 'área', label: 'Área' },
+  { id: 'linha', label: 'Linha' },
+  { id: 'cone', label: 'Cone' },
+  { id: 'todos ao redor', label: 'Todos ao redor' },
+  { id: 'grupo', label: 'Grupo' },
 ];
 const SPEED_OPTIONS: { value: CardSpeed | undefined; label: string }[] = [
   { value: undefined, label: 'Sem Speed' },
@@ -67,6 +103,17 @@ export default function CardEdit() {
   const [actionType, setActionType] = useState<CardActionType>('attribute');
   const [momentaryAttrs, setMomentaryAttrs] = useState<AttrValues>({});
   const [useCTInfluence, setUseCTInfluence] = useState(false);
+  const [movementRange, setMovementRange] = useState<MovementRange | undefined>();
+  const [movementType, setMovementType] = useState<MovementType | undefined>();
+  const [summonType, setSummonType] = useState<DiverseSummonType | undefined>();
+  const [summonQuantity, setSummonQuantity] = useState(0);
+  const [summonHpIndividual, setSummonHpIndividual] = useState(0);
+  const [summonHpTotal, setSummonHpTotal] = useState(0);
+  const [summonAtkIndividual, setSummonAtkIndividual] = useState(0);
+  const [summonDefIndividual, setSummonDefIndividual] = useState(0);
+  const [targetCount, setTargetCount] = useState(0);
+  const [maxTargets, setMaxTargets] = useState(0);
+  const [targetShape, setTargetShape] = useState<TargetShape | undefined>();
   const [durationType, setDurationType] = useState<DurationType>('instantâneo');
   const [durationTurns, setDurationTurns] = useState(0);
   const [upkeepCost, setUpkeepCost] = useState<AttrValues>({});
@@ -88,6 +135,17 @@ export default function CardEdit() {
         setActionType(c.actionType || (c.entityType ? 'entity' : 'attribute'));
         setMomentaryAttrs(c.momentaryAttrs || {});
         setUseCTInfluence(!!c.useCTInfluence);
+        setMovementRange(c.movementRange);
+        setMovementType(c.movementType);
+        setSummonType(c.summonType);
+        setSummonQuantity(c.summonQuantity || 0);
+        setSummonHpIndividual(c.summonHpIndividual || 0);
+        setSummonHpTotal(c.summonHpTotal || 0);
+        setSummonAtkIndividual(c.summonAtkIndividual || 0);
+        setSummonDefIndividual(c.summonDefIndividual || 0);
+        setTargetCount(c.targetCount || 0);
+        setMaxTargets(c.maxTargets || 0);
+        setTargetShape(c.targetShape);
         setDurationType(c.durationType || 'instantâneo');
         setDurationTurns(c.durationTurns || 0);
         setUpkeepCost(c.upkeepCost || {});
@@ -110,6 +168,17 @@ export default function CardEdit() {
       actionType,
       momentaryAttrs: cleanAttrs(momentaryAttrs),
       useCTInfluence,
+      movementRange,
+      movementType,
+      summonType,
+      summonQuantity: cleanOptionalNum(summonQuantity),
+      summonHpIndividual: cleanOptionalNum(summonHpIndividual),
+      summonHpTotal: cleanOptionalNum(summonHpTotal),
+      summonAtkIndividual: cleanOptionalNum(summonAtkIndividual),
+      summonDefIndividual: cleanOptionalNum(summonDefIndividual),
+      targetCount: cleanOptionalNum(targetCount),
+      maxTargets: cleanOptionalNum(maxTargets),
+      targetShape,
       durationType,
       durationTurns: sanitizeNum(String(durationTurns)),
       upkeepCost: cleanAttrs(upkeepCost),
@@ -171,6 +240,14 @@ export default function CardEdit() {
               setCardType(t.id);
               if (t.id === 'arma/equipamento') setActionType('equipment');
               if (t.id === 'modo/buff') setActionType('mode');
+              if (t.id === 'movimentação') {
+                setActionType('movement');
+                setEntityType(undefined);
+              }
+              if (t.id === 'invocação diversa') {
+                setActionType('diverse_summon');
+                setEntityType(undefined);
+              }
               if (['invocação', 'edo tensei', 'marionete'].includes(t.id)) {
                 setActionType('entity');
                 setEntityType(t.id as EntityType);
@@ -191,6 +268,11 @@ export default function CardEdit() {
             onPress={() => {
               setActionType(a.id);
               if (a.id === 'entity') setEntityType(entityType || 'invocação');
+              if (a.id === 'movement') setCardType('movimentação');
+              if (a.id === 'diverse_summon') {
+                setCardType('invocação diversa');
+                setEntityType(undefined);
+              }
               if (a.id !== 'entity' && entityType && actionType === 'entity') setEntityType(undefined);
             }}
             testID={`card-action-${a.id}`}
@@ -215,15 +297,61 @@ export default function CardEdit() {
         </View>
       ) : null}
 
-      <Text style={styles.label}>Entidade invocada</Text>
+      {actionType === 'movement' ? (
+        <View>
+          <Text style={styles.label}>Alcance da movimentação</Text>
+          <View style={styles.chipsRow}>
+            {MOVEMENT_RANGES.map(option => (
+              <Chip key={option.id} label={option.label} active={movementRange === option.id} onPress={() => setMovementRange(option.id)} testID={`movement-range-${option.id}`} />
+            ))}
+          </View>
+          <Text style={styles.label}>Tipo de movimentação</Text>
+          <View style={styles.chipsRow}>
+            {MOVEMENT_TYPES.map(option => (
+              <Chip key={option.id} label={option.label} active={movementType === option.id} onPress={() => setMovementType(option.id)} testID={`movement-type-${option.id}`} />
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      {actionType === 'diverse_summon' ? (
+        <View>
+          <Text style={styles.label}>Tipo de invocação diversa</Text>
+          <View style={styles.chipsRow}>
+            {DIVERSE_SUMMON_TYPES.map(option => (
+              <Chip key={option.id} label={option.label} active={summonType === option.id} onPress={() => setSummonType(option.id)} testID={`summon-type-${option.id}`} />
+            ))}
+          </View>
+          <Input label={`Quantidade (${formatNumberBR(summonQuantity)})`} value={String(summonQuantity)} onChangeText={(t) => setSummonQuantity(sanitizeNum(t))} keyboardType="numeric" testID="summon-quantity-input" />
+          <Input label={`HP individual (${formatNumberBR(summonHpIndividual)})`} value={String(summonHpIndividual)} onChangeText={(t) => setSummonHpIndividual(sanitizeNum(t))} keyboardType="numeric" testID="summon-hp-individual-input" />
+          <Input label={`HP total (${formatNumberBR(summonHpTotal)})`} value={String(summonHpTotal)} onChangeText={(t) => setSummonHpTotal(sanitizeNum(t))} keyboardType="numeric" testID="summon-hp-total-input" />
+          <Input label={`Atk individual (${formatNumberBR(summonAtkIndividual)})`} value={String(summonAtkIndividual)} onChangeText={(t) => setSummonAtkIndividual(sanitizeNum(t))} keyboardType="numeric" testID="summon-atk-individual-input" />
+          <Input label={`Def individual (${formatNumberBR(summonDefIndividual)})`} value={String(summonDefIndividual)} onChangeText={(t) => setSummonDefIndividual(sanitizeNum(t))} keyboardType="numeric" testID="summon-def-individual-input" />
+        </View>
+      ) : null}
+
+      <Text style={styles.label}>Alvos / área</Text>
       <View style={styles.chipsRow}>
-        <Chip label="Nenhuma" active={!entityType} onPress={() => setEntityType(undefined)} testID="entity-none" />
-        {ENTITY_TYPES.map(t => (
-          <Chip key={t} label={t} active={entityType === t} onPress={() => setEntityType(t)} testID={`entity-${t}`} />
+        {TARGET_SHAPES.map(option => (
+          <Chip key={option.id} label={option.label} active={targetShape === option.id} onPress={() => setTargetShape(option.id)} testID={`target-shape-${option.id}`} />
         ))}
       </View>
+      <Input label={`Alvos declarados/criados (${formatNumberBR(targetCount)})`} value={String(targetCount)} onChangeText={(t) => setTargetCount(sanitizeNum(t))} keyboardType="numeric" testID="target-count-input" />
+      <Input label={`Máximo de alvos atingidos (${formatNumberBR(maxTargets)})`} value={String(maxTargets)} onChangeText={(t) => setMaxTargets(sanitizeNum(t))} keyboardType="numeric" testID="max-targets-input" />
 
-      {entityType ? (
+      {actionType !== 'diverse_summon' ? (
+        <>
+          <Text style={styles.label}>Entidade invocada</Text>
+          <View style={styles.chipsRow}>
+            <Chip label="Nenhuma" active={!entityType} onPress={() => setEntityType(undefined)} testID="entity-none" />
+            {ENTITY_TYPES.map(t => (
+              <Chip key={t} label={t} active={entityType === t} onPress={() => setEntityType(t)} testID={`entity-${t}`} />
+            ))}
+          </View>
+        </>
+      ) : null}
+
+      {entityType && actionType !== 'diverse_summon' ? (
         <View>
           <Text style={styles.label}>Atributos próprios da entidade</Text>
           {ATTRS.map(a => (
@@ -338,6 +466,10 @@ function cleanAttrs(v: AttrValues): AttrValues {
     if (n != null && isFinite(n) && !isNaN(n)) out[k] = n;
   }
   return out;
+}
+
+function cleanOptionalNum(value: number): number | undefined {
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : undefined;
 }
 
 const styles = StyleSheet.create({

@@ -61,7 +61,17 @@ export default function MenuCard() {
   ));
   const normalizedQuery = query.trim().toLowerCase();
   const visibleCards = cards.filter((card) => {
-    const haystack = `${card.name} ${card.caption} ${card.rank || ''}`.toLowerCase();
+    const haystack = [
+      card.name,
+      card.caption,
+      card.rank || '',
+      card.cardType || '',
+      card.actionType || '',
+      card.movementType || '',
+      card.movementRange || '',
+      card.summonType || '',
+      card.targetShape || '',
+    ].join(' ').toLowerCase();
     const queryOk = !normalizedQuery || haystack.includes(normalizedQuery);
     const rankOk = cardRanks.length === 0 || cardRanks.includes(card.rank || 'E');
     const ctOk = ctFilter === 'all' || canCTUseCard(cts.find(ct => ct.id === ctFilter), card);
@@ -227,6 +237,19 @@ function canCTUseCard(ct: CT | undefined, card: Card) {
 
 function describeCardEffects(card: Card): string {
   const parts: string[] = [];
+  if (card.actionType === 'movement' || card.cardType === 'movimentação') {
+    parts.push(`Movimentação${card.movementType ? `: ${card.movementType}` : ''}${card.movementRange ? ` • alcance ${card.movementRange}` : ''}`);
+  }
+  if (card.actionType === 'diverse_summon' || card.cardType === 'invocação diversa') {
+    parts.push(`Invocação diversa${card.summonType ? `: ${card.summonType}` : ''}${card.summonQuantity ? ` • qtd ${formatNumberBR(card.summonQuantity)}` : ''}`);
+  }
+  if (card.maxTargets || card.targetCount || card.targetShape) {
+    parts.push([
+      card.targetShape ? `Área: ${card.targetShape}` : '',
+      card.maxTargets ? `Alvos máx.: ${formatNumberBR(card.maxTargets)}` : '',
+      card.targetCount ? `Qtd/alvos: ${formatNumberBR(card.targetCount)}` : '',
+    ].filter(Boolean).join(' • '));
+  }
   const momentary = ATTRS.filter(a => card.momentaryAttrs?.[a] != null).map(a => `${a}:${formatNumberBR(card.momentaryAttrs?.[a])}`).join(',');
   if (momentary) parts.push(`Ação: ${momentary}${card.useCTInfluence ? ' + atributo base' : ''}`);
   if (card.effect === 'none') return parts.join('  •  ');

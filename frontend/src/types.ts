@@ -11,13 +11,17 @@ export type AttrValues = Partial<Record<Attr, number>>;
 export type UnlimitedFlags = Partial<Record<Attr, boolean>>;
 
 export type CardEffect = 'none' | 'cost' | 'boost' | 'cost_boost' | 'unlimited';
-export type EntityType = 'invocação' | 'marionete' | 'edo tensei' | 'entidade' | 'criatura';
-export type CardActionType = 'attribute' | 'attack' | 'defense' | 'equipment' | 'mode' | 'entity';
-export type CardType = 'técnica' | 'modo/buff' | 'arma/equipamento' | 'invocação' | 'edo tensei' | 'marionete';
+export type EntityType = 'invocação' | 'marionete' | 'edo tensei';
+export type CardActionType = 'attribute' | 'attack' | 'defense' | 'equipment' | 'mode' | 'entity' | 'movement' | 'diverse_summon';
+export type CardType = 'técnica' | 'modo/buff' | 'arma/equipamento' | 'invocação' | 'edo tensei' | 'marionete' | 'movimentação' | 'invocação diversa';
 export type DurationType = 'instantâneo' | 'turnos' | 'persistente';
 export type StackBehavior = 'stack' | 'replace';
 export type CardSpeed = number | 'instant';
 export type BossDifficulty = 'facil' | 'medio' | 'dificil' | 'impossivel';
+export type MovementRange = 'curto' | 'médio' | 'longo' | 'global/dimensional';
+export type MovementType = 'avanço' | 'recuo' | 'esquiva' | 'aproximação' | 'reposicionamento' | 'voo' | 'teleporte' | 'deslocamento dimensional';
+export type DiverseSummonType = 'clone' | 'grupo' | 'enxame' | 'constructo' | 'invocação menor' | 'objeto invocado';
+export type TargetShape = 'único' | 'área' | 'linha' | 'cone' | 'todos ao redor' | 'grupo';
 
 export type BossStats = {
   Hp: number;
@@ -38,6 +42,17 @@ export type Card = {
   actionType?: CardActionType;
   momentaryAttrs?: AttrValues;
   useCTInfluence?: boolean;
+  movementRange?: MovementRange;
+  movementType?: MovementType;
+  summonType?: DiverseSummonType;
+  summonQuantity?: number;
+  summonHpIndividual?: number;
+  summonHpTotal?: number;
+  summonAtkIndividual?: number;
+  summonDefIndividual?: number;
+  targetCount?: number;
+  maxTargets?: number;
+  targetShape?: TargetShape;
   durationType?: DurationType;
   durationTurns?: number;
   upkeepCost?: AttrValues;
@@ -58,6 +73,8 @@ export type CT = {
   image?: string;
   attrs: Record<Attr, number>;
   unlimited: UnlimitedFlags;
+  resourceName?: 'ENE';
+  resourceValue?: number;
 };
 
 export type MatchType =

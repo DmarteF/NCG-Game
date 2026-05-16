@@ -158,7 +158,18 @@ export default function Battle() {
       const defense = resolveBossDefense(bossState, played, observation, finalAttrs, momentaryActions);
       lastBossAnalysisRef.current = defense.analysis;
       const nextBossCT = createBossCT(defense.boss);
-      const defenseMsg: ChatMsg = { id: uid(), turn, team: 'system', text: defense.lines.join('\n'), timestamp: Date.now() };
+      const defenseExtra = `ENE restante: ${formatNumberBR(defense.boss.stats.Ene)}\nDano recebido: ${formatNumberBR(defense.damageTaken)}\nHP restante do Boss: ${formatNumberBR(defense.boss.stats.Hp)}`;
+      const defenseCard = defense.card ? bossCardToSnapshot(defense.card, defenseExtra) : undefined;
+      const defenseMsg: ChatMsg = {
+        id: uid(),
+        turn,
+        team: defenseCard ? 'team2' : 'system',
+        text: defense.lines.join('\n'),
+        timestamp: Date.now(),
+        playedCards: defenseCard ? [{ cardSnapshot: defenseCard }] : undefined,
+        ctSnapshot: defenseCard ? nextBossCT : undefined,
+        finalAttrs: defenseCard ? ctToBattleAttrs(nextBossCT) : undefined,
+      };
       registerPersistentEffects(played.map(p => p.cardSnapshot), keptActiveEffectIds);
       setBossState(defense.boss);
       setBattleAttrs((attrs) => ({ ...attrs, team1: finalAttrs, team2: ctToBattleAttrs(nextBossCT) }));
@@ -191,8 +202,11 @@ export default function Battle() {
     const playerCT = { ...initCT1, attrs: battleAttrs.team1 as Record<Attr, number> };
     const attack = resolveBossAttack(bossState, playerCT, battleAttrs.team1, lastBossAnalysisRef.current);
     const nextBossCT = createBossCT(attack.boss);
+    const bossExtra = attack.card?.kind === 'attack'
+      ? `ENE restante: ${formatNumberBR(attack.boss.stats.Ene)}\nDano possível: ${formatNumberBR(attack.damagePossible)}\nAguardando resposta do jogador.`
+      : `ENE restante: ${formatNumberBR(attack.boss.stats.Ene)}\nAguardando resposta do jogador.`;
     const bossCard = attack.card
-      ? bossCardToSnapshot(attack.card, `ENE restante: ${formatNumberBR(attack.boss.stats.Ene)}\nDano possível: ${formatNumberBR(attack.damagePossible)}\nAguardando resposta do jogador.`)
+      ? bossCardToSnapshot(attack.card, bossExtra)
       : undefined;
     setBossState(attack.boss);
     setBattleAttrs((attrs) => ({ ...attrs, team2: ctToBattleAttrs(nextBossCT) }));
@@ -490,9 +504,10 @@ function ChatBubble({ msg, t2Label, onImagePress }: { msg: ChatMsg; t2Label: str
             </View>
             {msg.finalAttrs && (
               <View style={{ marginTop: 6 }}>
-                {visibleFinalAttrs(msg.finalAttrs!).map((a) => (
+                {visibleFinalAttrs(msg.finalAttrs!).filter(a => !(msg.ctSnapshot?.resourceName === 'ENE' && a === 'Ck')).map((a) => (
                   <Text key={a} style={styles.attrLine}>{a}: {formatNumberBR(msg.finalAttrs![a])}</Text>
                 ))}
+                {msg.ctSnapshot.resourceName === 'ENE' ? <Text style={styles.attrLine}>ENE: {formatNumberBR(msg.ctSnapshot.resourceValue || 0)}</Text> : null}
               </View>
             )}
             {msg.ctObservation ? <Text style={styles.obs}>Obs: {msg.ctObservation}</Text> : null}
@@ -502,7 +517,7 @@ function ChatBubble({ msg, t2Label, onImagePress }: { msg: ChatMsg; t2Label: str
           <View style={styles.entityBlock}>
             <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
               <ZoomableThumb uri={msg.activeEntitySnapshot.image} onPress={onImagePress} />
-              <Text style={styles.cardName}>{msg.activeEntitySnapshot.entityType || 'entidade'} {msg.activeEntitySnapshot.name} — Rank {msg.activeEntitySnapshot.rank}</Text>
+              <Text style={styles.cardName}>{msg.activeEntitySnapshot.entityType || 'invocação'} {msg.activeEntitySnapshot.name} — Rank {msg.activeEntitySnapshot.rank}</Text>
             </View>
             <Text style={styles.obs}>Custos/aumentos aplicados na entidade ativa.</Text>
             {msg.finalEntityAttrs ? (
@@ -524,6 +539,22 @@ function renderEffectLines(c: Card, action?: MomentaryAction) {
   const cost = ATTRS.filter(a => c.cost[a] != null).map(a => `${a}: ${formatNumberBR(c.cost[a])}`).join(', ');
   const boost = ATTRS.filter(a => c.boost[a] != null).map(a => `${a}: ${formatNumberBR(c.boost[a])}`).join(', ');
   const unl = ATTRS.filter(a => c.unlimited[a]).map(a => `${a}: ilimitado`).join(', ');
+  if (c.actionType === 'movement' || c.cardType === 'movimentação') {
+    lines.push('Tipo: Movimentação');
+    if (c.movementType) lines.push(`Movimento: ${c.movementType}`);
+    if (c.movementRange) lines.push(`Alcance: ${c.movementRange}`);
+  }
+  if (c.actionType === 'diverse_summon' || c.cardType === 'invocação diversa') {
+    lines.push(`Tipo: Invocação diversa${c.summonType ? ` / ${c.summonType}` : ''}`);
+    if (c.summonQuantity) lines.push(`Quantidade: ${formatNumberBR(c.summonQuantity)}`);
+    if (c.summonHpIndividual) lines.push(`HP individual: ${formatNumberBR(c.summonHpIndividual)}`);
+    if (c.summonHpTotal) lines.push(`HP total: ${formatNumberBR(c.summonHpTotal)}`);
+    if (c.summonAtkIndividual) lines.push(`Atk individual: ${formatNumberBR(c.summonAtkIndividual)}`);
+    if (c.summonDefIndividual) lines.push(`Def individual: ${formatNumberBR(c.summonDefIndividual)}`);
+  }
+  if (c.targetShape) lines.push(`Área/alvo: ${c.targetShape}`);
+  if (c.targetCount) lines.push(`Alvos/quantidade: ${formatNumberBR(c.targetCount)}`);
+  if (c.maxTargets) lines.push(`Máx. alvos atingidos: ${formatNumberBR(c.maxTargets)}`);
   if (action) {
     for (const attr of ATTRS.filter(a => action.final[a] != null)) {
       lines.push(`${attr} final: ${formatNumberBR(action.final[attr])}`);
@@ -670,7 +701,7 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
     return ai - bi;
   }).filter((c) => {
     const q = cardQuery.trim().toLowerCase();
-    const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''} ${formatSpeed(c.speed)}`.toLowerCase().includes(q);
+    const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''} ${c.cardType || ''} ${c.actionType || ''} ${c.movementType || ''} ${c.movementRange || ''} ${c.summonType || ''} ${c.targetShape || ''} ${formatSpeed(c.speed)}`.toLowerCase().includes(q);
     const rankOk = cardRanks.length === 0 || cardRanks.includes(c.rank || 'E');
     const bossOk = !bossDifficulty || canBossDifficultyUseCard(bossDifficulty, c);
     return queryOk && rankOk && bossOk && canCTUseCard(activeCT, c);
@@ -705,7 +736,7 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
     const effectiveCT = { ...activeCT, attrs: effectiveAttrs as Record<Attr, number> };
     const cardsForResolve = selectedCards.filter(card => !(card.durationType !== 'instantâneo' && activeIds.includes(card.id)));
     const resolved = resolveCombat(effectiveCT, activeEntity, cardsForResolve, entityCostIds, entityBoostIds);
-    const targetNote = activeEntity ? `Alvo ativo: ${activeEntity.entityType || 'entidade'} ${activeEntity.name}.` : 'Alvo ativo: O C.T principal.';
+    const targetNote = activeEntity ? `Alvo ativo: ${activeEntity.entityType || 'invocação'} ${activeEntity.name}.` : 'Alvo ativo: O C.T principal.';
     const costNote = activeEntity && entityCostIds.length > 0 ? `Custo na invocação: ${selectedCards.filter(c => entityCostIds.includes(c.id)).map(c => c.name).join(', ')}.` : 'Custos no O C.T principal.';
     const keptNote = keptEffects.length > 0 ? `Continua ativo: ${keptEffects.map(effect => effect.card.name).join(', ')}.` : '';
     const droppedNote = droppedEffects.length > 0 ? `Desativado: ${droppedEffects.map(effect => effect.card.name).join(', ')}. Bônus removido.` : '';
@@ -808,7 +839,7 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
                       {entities.map(entity => (
                         <Chip
                           key={entity.id}
-                          label={`${entity.entityType || 'entidade'} ${entity.name}`}
+                          label={`${entity.entityType || 'invocação'} ${entity.name}`}
                           active={activeEntityId === entity.id}
                           onPress={() => setActiveEntityId(entity.id)}
                           testID={`play-target-entity-${entity.sourceCardId}`}
@@ -906,6 +937,12 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
             <Chip label="Sim" active={!!card.useCTInfluence} onPress={() => onChange({ useCTInfluence: true })} testID={`play-influence-yes-${card.id}`} />
           </View>
         </>
+      ) : null}
+      {card.actionType === 'movement' || card.cardType === 'movimentação' ? (
+        <Text style={styles.obs}>Movimentação: {[card.movementType, card.movementRange ? `alcance ${card.movementRange}` : ''].filter(Boolean).join(' • ') || 'sem detalhes'}</Text>
+      ) : null}
+      {card.actionType === 'diverse_summon' || card.cardType === 'invocação diversa' ? (
+        <Text style={styles.obs}>Invocação diversa: {[card.summonType, card.summonQuantity ? `qtd ${formatNumberBR(card.summonQuantity)}` : ''].filter(Boolean).join(' • ') || 'sem detalhes'}</Text>
       ) : null}
       <Text style={styles.label}>Custo</Text>
       <AttrEditor label="Custo" values={card.cost} setValues={(v) => onChange({ cost: v })} keyPrefix={`play-cost-${card.id}`} />

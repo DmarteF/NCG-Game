@@ -505,7 +505,7 @@ function ChatBubble({ msg, meName, oppName, onImagePress }: { msg: ChatItem; meN
           <View style={styles.entityBlock}>
             <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
               <ZoomableThumb uri={msg.activeEntitySnapshot.image} onPress={onImagePress} />
-              <Text style={styles.cardName}>{msg.activeEntitySnapshot.entityType || 'entidade'} {msg.activeEntitySnapshot.name} — Rank {msg.activeEntitySnapshot.rank}</Text>
+              <Text style={styles.cardName}>{msg.activeEntitySnapshot.entityType || 'invocação'} {msg.activeEntitySnapshot.name} — Rank {msg.activeEntitySnapshot.rank}</Text>
             </View>
             <Text style={styles.obs}>Custos/aumentos aplicados na entidade ativa.</Text>
             {msg.finalEntityAttrs ? (
@@ -526,6 +526,22 @@ function renderEffectLines(c: Card, action?: MomentaryAction) {
   const cost = ATTRS.filter(a => c.cost[a] != null).map(a => `${a}: ${formatNumberBR(c.cost[a])}`).join(', ');
   const boost = ATTRS.filter(a => c.boost[a] != null).map(a => `${a}: ${formatNumberBR(c.boost[a])}`).join(', ');
   const unl = ATTRS.filter(a => c.unlimited[a]).map(a => `${a}: ilimitado`).join(', ');
+  if (c.actionType === 'movement' || c.cardType === 'movimentação') {
+    lines.push('Tipo: Movimentação');
+    if (c.movementType) lines.push(`Movimento: ${c.movementType}`);
+    if (c.movementRange) lines.push(`Alcance: ${c.movementRange}`);
+  }
+  if (c.actionType === 'diverse_summon' || c.cardType === 'invocação diversa') {
+    lines.push(`Tipo: Invocação diversa${c.summonType ? ` / ${c.summonType}` : ''}`);
+    if (c.summonQuantity) lines.push(`Quantidade: ${formatNumberBR(c.summonQuantity)}`);
+    if (c.summonHpIndividual) lines.push(`HP individual: ${formatNumberBR(c.summonHpIndividual)}`);
+    if (c.summonHpTotal) lines.push(`HP total: ${formatNumberBR(c.summonHpTotal)}`);
+    if (c.summonAtkIndividual) lines.push(`Atk individual: ${formatNumberBR(c.summonAtkIndividual)}`);
+    if (c.summonDefIndividual) lines.push(`Def individual: ${formatNumberBR(c.summonDefIndividual)}`);
+  }
+  if (c.targetShape) lines.push(`Área/alvo: ${c.targetShape}`);
+  if (c.targetCount) lines.push(`Alvos/quantidade: ${formatNumberBR(c.targetCount)}`);
+  if (c.maxTargets) lines.push(`Máx. alvos atingidos: ${formatNumberBR(c.maxTargets)}`);
   if (action) {
     for (const attr of ATTRS.filter(a => action.final[a] != null)) {
       lines.push(`${attr} final: ${formatNumberBR(action.final[attr])}`);
@@ -630,7 +646,7 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
     return ai - bi;
   }).filter((c) => {
     const q = cardQuery.trim().toLowerCase();
-    const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''} ${formatSpeed(c.speed)}`.toLowerCase().includes(q);
+    const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''} ${c.cardType || ''} ${c.actionType || ''} ${c.movementType || ''} ${c.movementRange || ''} ${c.summonType || ''} ${c.targetShape || ''} ${formatSpeed(c.speed)}`.toLowerCase().includes(q);
     const rankOk = cardRanks.length === 0 || cardRanks.includes(c.rank || 'E');
     return queryOk && rankOk && canCTUseCard(activeCT, c);
   });
@@ -648,7 +664,7 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
     const entityCostIds = activeEntity ? entityCostCardIds : [];
     const entityBoostIds = activeEntity ? entityBoostCardIds : [];
     const resolved = resolveCombat(activeCT, activeEntity, selectedCards, entityCostIds, entityBoostIds);
-    const targetNote = activeEntity ? `Alvo ativo: ${activeEntity.entityType || 'entidade'} ${activeEntity.name}.` : 'Alvo ativo: O C.T principal.';
+    const targetNote = activeEntity ? `Alvo ativo: ${activeEntity.entityType || 'invocação'} ${activeEntity.name}.` : 'Alvo ativo: O C.T principal.';
     const costNote = activeEntity && entityCostIds.length > 0 ? `Custo na invocação: ${selectedCards.filter(c => entityCostIds.includes(c.id)).map(c => c.name).join(', ')}.` : 'Custos no O C.T principal.';
     const obs = [targetNote, costNote, observation.trim()].filter(Boolean).join(' ');
     Storage.saveLastPlayedCardIds(selectedCards.map(c => c.id));
@@ -715,7 +731,7 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
                       {entities.map(entity => (
                         <Chip
                           key={entity.id}
-                          label={`${entity.entityType || 'entidade'} ${entity.name}`}
+                          label={`${entity.entityType || 'invocação'} ${entity.name}`}
                           active={activeEntityId === entity.id}
                           onPress={() => setActiveEntityId(entity.id)}
                           testID={`online-play-target-entity-${entity.sourceCardId}`}
@@ -813,6 +829,12 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
             <Chip label="Sim" active={!!card.useCTInfluence} onPress={() => onChange({ useCTInfluence: true })} testID={`online-play-influence-yes-${card.id}`} />
           </View>
         </>
+      ) : null}
+      {card.actionType === 'movement' || card.cardType === 'movimentação' ? (
+        <Text style={styles.obs}>Movimentação: {[card.movementType, card.movementRange ? `alcance ${card.movementRange}` : ''].filter(Boolean).join(' • ') || 'sem detalhes'}</Text>
+      ) : null}
+      {card.actionType === 'diverse_summon' || card.cardType === 'invocação diversa' ? (
+        <Text style={styles.obs}>Invocação diversa: {[card.summonType, card.summonQuantity ? `qtd ${formatNumberBR(card.summonQuantity)}` : ''].filter(Boolean).join(' • ') || 'sem detalhes'}</Text>
       ) : null}
       <Text style={styles.label}>Custo</Text>
       <AttrEditor label="Custo" values={card.cost} setValues={(v) => onChange({ cost: v })} keyPrefix={`online-play-cost-${card.id}`} />

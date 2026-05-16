@@ -3,6 +3,8 @@ import { formatNumberBR, formatSpeed } from './format';
 import { BossCard, BossState, KAELZOR_BOSS_CARDS, bossCard } from './bossData';
 import { Card, CT, MomentaryAction, PlayedCard } from './types';
 
+export const bossDebug = false;
+
 export type PlayerActionAnalysis = {
   isAttack: boolean;
   isDefense: boolean;
@@ -21,6 +23,7 @@ export type PlayerActionAnalysis = {
 
 export type BossDefenseResult = {
   boss: BossState;
+  card?: BossCard;
   analysis: PlayerActionAnalysis;
   damageTaken: number;
   defeated: boolean;
@@ -73,6 +76,33 @@ function ownAttackFromCards(cards: PlayedCard[]) {
   }, 0);
 }
 
+function structuredCloneCount(cards: PlayedCard[]) {
+  return cards.reduce((max, played) => {
+    const card = played.cardSnapshot;
+    if (card.actionType !== 'diverse_summon' && card.cardType !== 'invocação diversa') return max;
+    return Math.max(max, numeric(card.summonQuantity) || numeric(card.targetCount));
+  }, 0);
+}
+
+function structuredTargetCount(cards: PlayedCard[], cloneCount: number) {
+  return cards.reduce((max, played) => {
+    const card = played.cardSnapshot;
+    const shapeTargets = card.targetShape && card.targetShape !== 'único' ? Math.max(2, numeric(card.targetCount), cloneCount) : 0;
+    const summonTargets = card.actionType === 'diverse_summon' || card.cardType === 'invocação diversa' ? numeric(card.summonQuantity) : 0;
+    return Math.max(max, numeric(card.targetCount), summonTargets, shapeTargets);
+  }, Math.max(1, cloneCount));
+}
+
+function hasStructuredArea(cards: PlayedCard[]) {
+  return cards.some(({ cardSnapshot: card }) => Boolean(
+    card.targetShape && card.targetShape !== 'único'
+    || numeric(card.maxTargets) > 1
+    || numeric(card.targetCount) > 1
+    || card.actionType === 'diverse_summon'
+    || card.cardType === 'invocação diversa'
+  ));
+}
+
 export function analyzePlayerAction(
   playedCards: PlayedCard[],
   observation: string,
@@ -81,8 +111,10 @@ export function analyzePlayerAction(
 ): PlayerActionAnalysis {
   const cardText = playedCards.map(item => `${item.cardSnapshot.name} ${item.cardSnapshot.caption}`).join(' ');
   const text = `${cardText} ${observation}`.toLowerCase();
-  const cloneCount = Math.max(maxDeclaredNumber(text, ['clone', 'clones']), keyword(text, ['clone', 'clones']) ? 1 : 0);
+  const structuredClones = structuredCloneCount(playedCards);
+  const cloneCount = Math.max(structuredClones, maxDeclaredNumber(text, ['clone', 'clones']), keyword(text, ['clone', 'clones']) ? 1 : 0);
   const declaredTargets = Math.max(
+    structuredTargetCount(playedCards, cloneCount),
     maxDeclaredNumber(text, ['alvo', 'alvos']),
     keyword(text, ['todos', 'grupo', 'área', 'area']) ? Math.max(cloneCount, 4) : 1,
   );
@@ -100,7 +132,7 @@ export function analyzePlayerAction(
     isDefense: defensePower > 0 || keyword(text, ['defesa', 'barreira', 'bloqueio', 'escudo', 'cúpula', 'cupula']),
     isGenjutsu: keyword(text, ['genjutsu', 'ilusão', 'ilusao', 'mente', 'mental']),
     isSealing: keyword(text, ['selo', 'selamento', 'aprisionar', 'prender']),
-    isArea: keyword(text, ['área', 'area', 'todos', 'grupo', 'todos os lados']) || cloneCount > 3 || declaredTargets > 3,
+    isArea: hasStructuredArea(playedCards) || keyword(text, ['área', 'area', 'todos', 'grupo', 'todos os lados']) || cloneCount > 3 || declaredTargets > 3,
     isInstant: maxSpeed === 'instant',
     declaredKill: keyword(text, ['hp: 0', 'te mato', 'te derroto', 'finalizo', 'acabou']),
     cloneCount,
@@ -120,6 +152,9 @@ function canPay(card: BossCard, boss: BossState) {
 
 function pay(card: BossCard, boss: BossState): BossState {
   const cooldowns = Object.fromEntries(Object.entries(boss.cooldowns).map(([id, value]) => [id, Math.max(0, value - 1)]));
+  const activates = ['mode', 'equipment', 'perception'].includes(card.kind);
+  const currentActive = boss.activeCardIds || [];
+  const activeCardIds = activates ? Array.from(new Set([...currentActive, card.id])) : currentActive;
   return {
     ...boss,
     stats: {
@@ -127,6 +162,7 @@ function pay(card: BossCard, boss: BossState): BossState {
       Ene: Math.max(0, boss.stats.Ene - numeric(card.cost?.ENE)),
       Ag: Math.max(0, boss.stats.Ag - numeric(card.cost?.Ag)),
     },
+    activeCardIds,
     cooldowns: card.cooldownTurns ? { ...cooldowns, [card.id]: card.cooldownTurns } : cooldowns,
   };
 }
@@ -159,61 +195,98 @@ export function resolveBossDefense(
   momentaryActions: MomentaryAction[] = [],
 ): BossDefenseResult {
   const analysis = analyzePlayerAction(playedCards, observation, finalAttrs, momentaryActions);
-  const lines: string[] = ['Kael’Zor analisou a ofensiva inimiga.'];
-  lines.push(`Speed detectada: ${analysis.maxSpeed === 'instant' ? 'Instantânea' : analysis.maxSpeed ?? 'Sem Speed'}.`);
-  if (analysis.cloneCount > 0) lines.push(`Clones declarados: ${analysis.cloneCount}.`);
-  if (analysis.declaredTargets > 1) lines.push(`Alvos declarados: ${analysis.declaredTargets}.`);
-  if (analysis.declaredKill) lines.push('Declaração de finalização detectada; será validada pelo cálculo.');
+  const lines: string[] = ['Kael’Zor reagiu à jogada do jogador.'];
+  if (bossDebug) {
+    lines.push(`Speed detectada: ${analysis.maxSpeed === 'instant' ? 'Instantânea' : analysis.maxSpeed ?? 'Sem Speed'}.`);
+    if (analysis.cloneCount > 0) lines.push(`Clones/alvos estruturados: ${analysis.cloneCount}.`);
+    if (analysis.declaredTargets > 1) lines.push(`Alvos considerados: ${analysis.declaredTargets}.`);
+    if (analysis.declaredKill) lines.push('Declaração de finalização detectada; será validada pelo cálculo.');
+  }
   if (!analysis.isAttack && !analysis.isGenjutsu && !analysis.isSealing) {
-    lines.push('Nenhuma ofensiva clara foi identificada. O Boss não recebeu dano direto.');
+    lines.push('Nenhum dano direto foi aplicado ao Boss.');
     return { boss, analysis, damageTaken: 0, defeated: false, lines };
   }
 
   const defense = chooseDefense(analysis, boss);
   let nextBoss = boss;
   let defenseValue = 0;
-  if (analysis.isInstant && (analysis.maxSpeed === 'instant')) {
+  if (bossDebug && analysis.isInstant && (analysis.maxSpeed === 'instant')) {
     lines.push('A ação foi marcada como instantânea; Kael’Zor só reage se houver defesa compatível.');
   }
-  if (analysis.maxSpeed === 'instant' || (typeof analysis.maxSpeed === 'number' && analysis.maxSpeed > 5)) {
+  if (bossDebug && (analysis.maxSpeed === 'instant' || (typeof analysis.maxSpeed === 'number' && analysis.maxSpeed > 5))) {
     lines.push('A Speed ultrapassou a reação Rank B disponível de Kael’Zor.');
   }
   if (defense) {
     nextBoss = pay(defense, boss);
     defenseValue = numeric(defense.def);
     if (defense.kind === 'movement') defenseValue = Math.floor(analysis.attackPower * 0.5);
-    lines.push(`${defense.name} foi escolhido. ${defense.notes}`);
-    if (defense.speed != null) lines.push(`${formatSpeed(defense.speed)}.`);
-    if (defense.def) lines.push(`DEF da resposta: ${formatNumberBR(defense.def)}.`);
+    lines.push(`Kael’Zor usou ${defense.name}.`);
+    if (defense.kind === 'movement') lines.push(`Resultado: ${defense.movementType || 'reposicionamento'} para reduzir o impacto.`);
+    else lines.push(`Resultado: defesa aplicada${defense.def ? ` (${formatNumberBR(defense.def)})` : ''}.`);
     lines.push(`ENE restante: ${formatNumberBR(nextBoss.stats.Ene)}.`);
   } else {
-    lines.push('Nenhuma defesa/reação disponível foi suficiente ou pagável; Kael’Zor recebe o impacto.');
+    lines.push('Resultado: Kael’Zor recebeu o impacto.');
   }
 
   const rawDamage = Math.max(0, analysis.attackPower - defenseValue);
   const damageTaken = analysis.isGenjutsu && defense?.id === 'mente-vazia-boss' ? 0 : rawDamage;
   nextBoss = { ...nextBoss, stats: { ...nextBoss.stats, Hp: Math.max(0, nextBoss.stats.Hp - damageTaken) } };
-  lines.push(`Atk final analisado: ${formatNumberBR(analysis.attackPower)}.`);
-  lines.push(`Dano recebido após resposta: ${formatNumberBR(damageTaken)}.`);
+  if (bossDebug) lines.push(`Atk final analisado: ${formatNumberBR(analysis.attackPower)}.`);
+  lines.push(`Dano recebido: ${formatNumberBR(damageTaken)}.`);
   lines.push(`HP restante do Boss: ${formatNumberBR(nextBoss.stats.Hp)}.`);
   if (analysis.declaredKill && nextBoss.stats.Hp > 0) {
     lines.push('A declaração de finalização foi analisada, mas dano/condição não foram suficientes para derrotar Kael’Zor.');
   }
-  return { boss: nextBoss, analysis, damageTaken, defeated: nextBoss.stats.Hp <= 0, lines };
+  return { boss: nextBoss, card: defense, analysis, damageTaken, defeated: nextBoss.stats.Hp <= 0, lines };
 }
 
-function chooseAttack(boss: BossState, analysis?: PlayerActionAnalysis) {
+function cardCost(card: BossCard) {
+  return numeric(card.cost?.ENE) + numeric(card.cost?.Ag);
+}
+
+function chooseBossAction(boss: BossState, analysis?: PlayerActionAnalysis) {
   const targets = Math.max(1, analysis?.cloneCount || analysis?.declaredTargets || 1);
-  const ordered = targets <= 1
-    ? ['corte-vazio-boss', 'lanca-fragmentada-boss']
-    : targets <= 3
-      ? ['lanca-fragmentada-boss', 'chuva-estilhacos-rubros-boss']
-      : targets <= 20
-        ? ['chuva-estilhacos-rubros-boss', 'onda-abismo-partido-boss']
-        : ['onda-abismo-partido-boss', 'ruptura-vazio-menor-boss', 'chuva-estilhacos-rubros-boss'];
-  if (targets > 50 && boss.lastAttackId !== 'ruptura-vazio-menor-boss') ordered.unshift('ruptura-vazio-menor-boss');
-  return ordered.map(id => bossCard(id)).find((card): card is BossCard => !!card && canPay(card, boss))
-    || KAELZOR_BOSS_CARDS.find(card => card.kind === 'attack' && canPay(card, boss));
+  const hpRatio = boss.stats.Hp / 500000;
+  const speed = analysis?.maxSpeed === 'instant' ? 99 : analysis?.maxSpeed || 0;
+  const available = KAELZOR_BOSS_CARDS.filter(card => canPay(card, boss));
+  if (available.length === 0) return undefined;
+
+  const scored = available.map((card) => {
+    let score = 0;
+    if (card.id === boss.lastAttackId) score -= 80;
+    if (card.kind === 'attack') {
+      score += 25;
+      if (targets <= 1 && (card.maxTargets || 1) <= 3) score += card.id === 'corte-vazio-boss' ? 18 : 14;
+      if (targets > 1 && (card.maxTargets || 1) >= Math.min(targets, 3)) score += 18;
+      if (targets > 3 && (card.maxTargets || 1) >= 20) score += 36;
+      if (targets > 50 && (card.maxTargets || 1) >= 100) score += 48;
+      if (boss.stats.Ene < 250000) score -= Math.floor(cardCost(card) / 20000);
+    }
+    if (card.kind === 'movement') {
+      score += 8;
+      if (speed >= 4 || numeric(analysis?.attackPower) > 450000) score += 36;
+      if (boss.turn % 3 === 0) score += 18;
+    }
+    if (card.kind === 'defense') {
+      score += 4;
+      if (analysis?.isArea && card.id === 'cupula-vazio-boss') score += 24;
+      if (numeric(analysis?.attackPower) > 400000 && card.id === 'reflexo-abissal-boss') score += 20;
+      if (hpRatio < 0.45) score += 18;
+    }
+    if (card.kind === 'mode' || card.kind === 'equipment' || card.kind === 'perception') {
+      if ((boss.activeCardIds || []).includes(card.id)) score -= 100;
+      else score += card.kind === 'mode' ? 20 : 14;
+      if (boss.turn <= 2) score += 10;
+      if (hpRatio < 0.55 && card.kind !== 'perception') score += 16;
+      if (speed >= 4 && card.kind === 'perception') score += 24;
+    }
+    if (card.kind === 'mental') {
+      score += analysis?.isGenjutsu ? 32 : -20;
+    }
+    return { card, score };
+  }).sort((a, b) => b.score - a.score || cardCost(a.card) - cardCost(b.card));
+
+  return scored[0]?.card;
 }
 
 export function resolveBossAttack(
@@ -223,29 +296,39 @@ export function resolveBossAttack(
   analysis?: PlayerActionAnalysis,
 ): BossAttackResult {
   const lines: string[] = [];
-  const attack = chooseAttack(boss, analysis);
-  if (!attack) {
-    lines.push('Kael’Zor não encontrou ENE/AG suficiente para atacar neste turno.');
+  const action = chooseBossAction(boss, analysis);
+  if (!action) {
+    lines.push('Kael’Zor não encontrou ENE/AG suficiente para agir neste turno.');
     lines.push('Aguardando resposta do jogador.');
     return { boss: { ...boss, turn: boss.turn + 1 }, playerAttrs, damagePossible: 0, defeatedPlayer: false, lines };
   }
   const targets = Math.max(1, analysis?.cloneCount || analysis?.declaredTargets || 1);
-  const hitTargets = Math.min(targets, attack.maxTargets || 1);
-  let nextBoss = pay(attack, { ...boss, lastAttackId: attack.id });
+  const hitTargets = Math.min(targets, action.maxTargets || 1);
+  let nextBoss = pay(action, { ...boss, lastAttackId: action.id });
   nextBoss = { ...nextBoss, turn: boss.turn + 1 };
 
   const playerDef = numeric(playerAttrs.Def);
-  const damage = Math.max(0, numeric(attack.atk) - playerDef);
+  const damage = action.kind === 'attack' ? Math.max(0, numeric(action.atk) - playerDef) : 0;
   const nextPlayerAttrs = { ...playerAttrs };
 
-  lines.push(`Kael’Zor escolheu ${attack.name}.`);
-  lines.push(`Motivo: ${targets <= 1 ? 'alvo único' : targets <= 3 ? 'até três alvos' : targets <= 20 ? 'grupo médio' : 'muitos alvos declarados'}.`);
-  lines.push(`Atk do Boss: ${formatNumberBR(attack.atk)}. ${formatSpeed(attack.speed) || 'Sem Speed'}.`);
-  lines.push(`Alvos máximos: ${attack.maxTargets || 1}. Alvos declarados pelo jogador: ${targets}. Até ${hitTargets} alvo(s) foram atingidos.`);
-  if (hitTargets < targets) lines.push(`${targets - hitTargets} alvo(s) podem permanecer fora do alcance desta técnica.`);
-  lines.push(`Def atual de ${playerCT?.name?.trim() || 'O C.T'}: ${formatNumberBR(playerDef)}.`);
-  lines.push(`Dano possível no HP principal: ${formatNumberBR(damage)}.`);
+  lines.push(`Kael’Zor usou ${action.name}.`);
+  if (action.kind === 'attack') {
+    lines.push(`Atk: ${formatNumberBR(action.atk)}. ${formatSpeed(action.speed) || 'Sem Speed'}.`);
+    if (targets > 1) {
+      lines.push(`Resultado: ${hitTargets} alvo(s) atingido(s)${hitTargets < targets ? `; ${targets - hitTargets} permanecem fora do alcance.` : '.'}`);
+    }
+    if (bossDebug) lines.push(`Def atual de ${playerCT?.name?.trim() || 'O C.T'}: ${formatNumberBR(playerDef)}.`);
+    lines.push(`Dano possível: ${formatNumberBR(damage)}.`);
+  } else if (action.kind === 'movement') {
+    lines.push(`Resultado: ${action.movementType || 'reposicionamento'} (${action.movementRange || 'alcance indefinido'}).`);
+  } else if (action.kind === 'mode') {
+    lines.push('Resultado: modo ativo no Boss.');
+  } else if (action.kind === 'equipment') {
+    lines.push('Resultado: equipamento ativo no Boss.');
+  } else if (action.kind === 'defense' || action.kind === 'mental' || action.kind === 'perception') {
+    lines.push('Resultado: reação/defesa preparada.');
+  }
   lines.push(`ENE restante do Boss: ${formatNumberBR(nextBoss.stats.Ene)}.`);
   lines.push('Aguardando resposta do jogador. Nenhuma vitória automática foi aplicada.');
-  return { boss: nextBoss, card: attack, playerAttrs: nextPlayerAttrs, damagePossible: damage, defeatedPlayer: false, lines };
+  return { boss: nextBoss, card: action, playerAttrs: nextPlayerAttrs, damagePossible: damage, defeatedPlayer: false, lines };
 }

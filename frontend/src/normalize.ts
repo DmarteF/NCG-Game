@@ -1,12 +1,16 @@
 import { ATTRS, Attr } from './theme';
-import { AttrValues, Card, CardActionType, CardEffect, CardSpeed, CardType, CT, DurationType, EntityType, StackBehavior, UnlimitedFlags } from './types';
+import { AttrValues, Card, CardActionType, CardEffect, CardSpeed, CardType, CT, DiverseSummonType, DurationType, EntityType, MovementRange, MovementType, StackBehavior, TargetShape, UnlimitedFlags } from './types';
 
 const emptyAttrs = (): Record<Attr, number> => ({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
 const validEntityTypes: EntityType[] = ['invocação', 'marionete', 'edo tensei'];
-const validCardTypes: CardType[] = ['técnica', 'modo/buff', 'arma/equipamento', 'invocação', 'edo tensei', 'marionete'];
-const validActionTypes: CardActionType[] = ['attribute', 'attack', 'defense', 'equipment', 'mode', 'entity'];
+const validCardTypes: CardType[] = ['técnica', 'modo/buff', 'arma/equipamento', 'invocação', 'edo tensei', 'marionete', 'movimentação', 'invocação diversa'];
+const validActionTypes: CardActionType[] = ['attribute', 'attack', 'defense', 'equipment', 'mode', 'entity', 'movement', 'diverse_summon'];
 const validDurationTypes: DurationType[] = ['instantâneo', 'turnos', 'persistente'];
 const validStack: StackBehavior[] = ['stack', 'replace'];
+const validMovementRanges: MovementRange[] = ['curto', 'médio', 'longo', 'global/dimensional'];
+const validMovementTypes: MovementType[] = ['avanço', 'recuo', 'esquiva', 'aproximação', 'reposicionamento', 'voo', 'teleporte', 'deslocamento dimensional'];
+const validDiverseSummonTypes: DiverseSummonType[] = ['clone', 'grupo', 'enxame', 'constructo', 'invocação menor', 'objeto invocado'];
+const validTargetShapes: TargetShape[] = ['único', 'área', 'linha', 'cone', 'todos ao redor', 'grupo'];
 
 function cleanAttrValues(values?: AttrValues): AttrValues {
   const out: AttrValues = {};
@@ -32,13 +36,24 @@ function inferCardType(card: Partial<Card>): CardType {
   if (card.entityType) return 'invocação';
   if (card.actionType === 'equipment') return 'arma/equipamento';
   if (card.actionType === 'mode') return 'modo/buff';
+  if (card.actionType === 'movement') return 'movimentação';
+  if (card.actionType === 'diverse_summon') return 'invocação diversa';
   return 'técnica';
 }
 
-function normalizeEntityType(entityType?: EntityType): EntityType | undefined {
+function normalizeEntityType(entityType?: EntityType | string): EntityType | undefined {
   if (!entityType) return undefined;
-  if (validEntityTypes.includes(entityType)) return entityType;
+  if (validEntityTypes.includes(entityType as EntityType)) return entityType as EntityType;
   return 'invocação';
+}
+
+function cleanOption<T extends string>(value: unknown, valid: readonly T[]): T | undefined {
+  return typeof value === 'string' && valid.includes(value as T) ? value as T : undefined;
+}
+
+function cleanPositiveNumber(value: unknown) {
+  const n = Math.trunc(Number(value || 0));
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
 function inferEffect(card: Partial<Card>): CardEffect {
@@ -62,12 +77,17 @@ function normalizeSpeed(speed: Partial<Card>['speed']): CardSpeed | undefined {
 }
 
 export function normalizeCard(card: Partial<Card>): Card {
-  const entityType = normalizeEntityType(card.entityType);
-  const cardType = inferCardType({ ...card, entityType });
+  const inferredEntityType = normalizeEntityType(card.entityType);
+  const cardType = inferCardType({ ...card, entityType: inferredEntityType });
+  const entityType = ['invocação', 'edo tensei', 'marionete'].includes(cardType) ? inferredEntityType || (cardType as EntityType) : undefined;
   const actionType = card.actionType && validActionTypes.includes(card.actionType)
     ? card.actionType
-    : cardType === 'arma/equipamento'
-      ? 'equipment'
+      : cardType === 'arma/equipamento'
+        ? 'equipment'
+      : cardType === 'movimentação'
+        ? 'movement'
+      : cardType === 'invocação diversa'
+        ? 'diverse_summon'
       : ['invocação', 'edo tensei', 'marionete'].includes(cardType)
         ? 'entity'
         : 'attribute';
@@ -84,6 +104,17 @@ export function normalizeCard(card: Partial<Card>): Card {
     actionType,
     momentaryAttrs: cleanAttrValues(card.momentaryAttrs),
     useCTInfluence: !!card.useCTInfluence,
+    movementRange: cleanOption(card.movementRange, validMovementRanges),
+    movementType: cleanOption(card.movementType, validMovementTypes),
+    summonType: cleanOption(card.summonType, validDiverseSummonTypes),
+    summonQuantity: cleanPositiveNumber(card.summonQuantity),
+    summonHpIndividual: cleanPositiveNumber(card.summonHpIndividual),
+    summonHpTotal: cleanPositiveNumber(card.summonHpTotal),
+    summonAtkIndividual: cleanPositiveNumber(card.summonAtkIndividual),
+    summonDefIndividual: cleanPositiveNumber(card.summonDefIndividual),
+    targetCount: cleanPositiveNumber(card.targetCount),
+    maxTargets: cleanPositiveNumber(card.maxTargets),
+    targetShape: cleanOption(card.targetShape, validTargetShapes),
     durationType: card.durationType && validDurationTypes.includes(card.durationType) ? card.durationType : card.durationType && ['manual', 'destruir', 'luta'].includes(card.durationType) ? 'persistente' : 'instantâneo',
     durationTurns: Math.max(0, Math.trunc(Number(card.durationTurns || 0))),
     upkeepCost: cleanAttrValues(card.upkeepCost),
@@ -106,5 +137,7 @@ export function normalizeCT(ct: Partial<CT>): CT {
     image: ct.image,
     attrs: { ...emptyAttrs(), ...(ct.attrs || {}), Dur: 0 },
     unlimited: {},
+    resourceName: ct.resourceName === 'ENE' ? 'ENE' : undefined,
+    resourceValue: ct.resourceName === 'ENE' ? cleanPositiveNumber(ct.resourceValue) || 0 : undefined,
   };
 }
