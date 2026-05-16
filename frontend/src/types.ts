@@ -4,6 +4,7 @@ export type Profile = {
   name: string;
   village: string;
   image?: string;
+  backgroundImage?: string;
 };
 
 export type AttrValues = Partial<Record<Attr, number>>;

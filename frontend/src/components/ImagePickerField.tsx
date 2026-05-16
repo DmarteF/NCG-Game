@@ -78,9 +78,7 @@ export default function ImagePickerField({
       // salva URI ORIGINAL
       onChange(imageUri);
 
-    } catch (err) {
-      console.log(err);
-
+    } catch {
       Alert.alert(
         'Erro',
         'Não foi possível selecionar imagem.'

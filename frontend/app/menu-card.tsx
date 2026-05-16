@@ -13,6 +13,7 @@ import { Header } from './profile';
 import { ctDisplayName, formatNumberBR, formatSpeed } from '../src/format';
 
 type Tab = 'cards' | 'ct';
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
 export default function MenuCard() {
   const router = useRouter();
@@ -149,7 +150,7 @@ export default function MenuCard() {
   );
 }
 
-function TabBtn({ label, active, onPress, testID }: any) {
+function TabBtn({ label, active, onPress, testID }: { label: string; active: boolean; onPress: () => void; testID: string }) {
   return (
     <Pressable onPress={onPress} testID={testID} style={({ pressed }) => [styles.tab, active && styles.tabActive, { opacity: pressed ? 0.85 : 1 }]}>
       <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
@@ -205,7 +206,7 @@ function CTItem({ ct, onEdit, onDelete }: { ct: CT; onEdit: () => void; onDelete
   );
 }
 
-function IconBtn({ icon, onPress, danger, testID }: any) {
+function IconBtn({ icon, onPress, danger, testID }: { icon: IconName; onPress: () => void; danger?: boolean; testID: string }) {
   return (
     <Pressable onPress={onPress} testID={testID} style={({ pressed }) => [styles.iconBtn, danger && styles.iconBtnDanger, { opacity: pressed ? 0.7 : 1 }]}>
       <Ionicons name={icon} size={18} color={danger ? '#FFD0D5' : theme.colors.primary} />

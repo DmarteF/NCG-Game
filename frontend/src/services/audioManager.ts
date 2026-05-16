@@ -12,7 +12,10 @@ class AudioManager {
 
       this.started = true;
 
-      if (musicTracks.length === 0) return;
+      if (musicTracks.length === 0) {
+        this.started = false;
+        return;
+      }
 
       const randomMusic = musicTracks[Math.floor(Math.random() * musicTracks.length)];
 
@@ -23,8 +26,8 @@ class AudioManager {
       });
 
       this.sound = sound;
-    } catch (e) {
-      console.log('Audio error:', e);
+    } catch {
+      this.started = false;
     }
   }
 

@@ -14,6 +14,7 @@ export default function ProfileScreen() {
   const [name, setName] = useState('');
   const [village, setVillage] = useState<string>('');
   const [image, setImage] = useState<string | undefined>();
+  const [backgroundImage, setBackgroundImage] = useState<string | undefined>();
 
   useEffect(() => {
     Storage.getProfile().then((p) => {
@@ -21,14 +22,15 @@ export default function ProfileScreen() {
         setName(p.name);
         setVillage(p.village);
         setImage(p.image);
+        setBackgroundImage(p.backgroundImage);
       }
     });
   }, []);
 
   const save = async () => {
     if (!name.trim()) return Alert.alert('Atenção', 'Informe o nome do personagem.');
-    if (!VILLAGES.includes(village as any)) return Alert.alert('Atenção', 'Selecione uma vila válida.');
-    await Storage.saveProfile({ name: name.trim(), village, image });
+    if (!(VILLAGES as readonly string[]).includes(village)) return Alert.alert('Atenção', 'Selecione uma vila válida.');
+    await Storage.saveProfile({ name: name.trim(), village, image, backgroundImage });
     router.back();
   };
 
@@ -77,6 +79,18 @@ export default function ProfileScreen() {
         })}
       </View>
 
+      <View style={styles.backgroundBlock}>
+        <ImagePickerField
+          value={backgroundImage}
+          onChange={setBackgroundImage}
+          size={180}
+          shape="rect"
+          label="Background do app"
+          testID="profile-background-picker"
+        />
+        <Text style={styles.bgHint}>Usado como fundo global nas telas principais. Se remover, o app volta ao fundo padrão.</Text>
+      </View>
+
       <View style={styles.actions}>
         <Button title="Cancelar" variant="ghost" onPress={() => router.back()} testID="profile-cancel-btn" />
         <Button title="Salvar" onPress={save} testID="profile-save-btn" style={{ flex: 1 }} />
@@ -117,5 +131,16 @@ const styles = StyleSheet.create({
   villageActive: { backgroundColor: 'rgba(255,59,0,0.15)', borderColor: theme.colors.borderActive },
   villageText: { color: theme.colors.textSecondary, fontSize: 13, fontWeight: '700' },
   villageTextActive: { color: '#fff' },
+  backgroundBlock: {
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.lg,
+    padding: 14,
+    marginBottom: 10,
+  },
+  bgHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16, textAlign: 'center' },
   actions: { flexDirection: 'row', gap: 12, marginTop: 12 },
 });

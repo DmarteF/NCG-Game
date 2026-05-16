@@ -91,7 +91,7 @@ export function normalizeCard(card: Partial<Card>): Card {
     effect: inferEffect(card),
     entityType,
     entityAttrs: entityType ? entityAttrs : undefined,
-    entityUnlimited: undefined,
+    entityUnlimited: entityType ? cleanUnlimited(card.entityUnlimited) : undefined,
     cost: cleanAttrValues(card.cost),
     boost: cleanAttrValues(card.boost),
     unlimited: cleanUnlimited(card.unlimited),

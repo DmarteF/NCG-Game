@@ -1,7 +1,9 @@
-import React from 'react';
-import { View, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, StatusBar, ImageBackground } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Storage } from '../storage';
 import { theme } from '../theme';
 
 type Props = {
@@ -13,10 +15,26 @@ type Props = {
 
 export default function Screen({ children, scroll = true, noPadding, testID }: Props) {
   const Body = scroll ? ScrollView : View;
+  const [backgroundImage, setBackgroundImage] = useState<string | undefined>();
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    Storage.getProfile().then((profile) => {
+      if (active) setBackgroundImage(profile?.backgroundImage);
+    });
+    return () => { active = false; };
+  }, []));
 
   return (
     <LinearGradient colors={['#0a0303', '#050202', '#0a0303']} style={styles.gradient}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      {backgroundImage ? (
+        <View pointerEvents="none" style={styles.backgroundImage}>
+          <ImageBackground source={{ uri: backgroundImage }} resizeMode="cover" style={styles.backgroundImage}>
+            <View style={styles.backgroundOverlay} />
+          </ImageBackground>
+        </View>
+      ) : null}
 
       <View pointerEvents="none" style={styles.glowTop} />
       <View pointerEvents="none" style={styles.glowBottom} />
@@ -58,6 +76,15 @@ const styles = StyleSheet.create({
 
   safe: {
     flex: 1,
+  },
+
+  backgroundImage: {
+    ...StyleSheet.absoluteFillObject,
+  },
+
+  backgroundOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(5, 2, 2, 0.72)',
   },
 
   glowTop: {

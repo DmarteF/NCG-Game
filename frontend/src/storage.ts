@@ -25,10 +25,20 @@ async function setJSON(key: string, value: unknown) {
   await AsyncStorage.setItem(key, JSON.stringify(value));
 }
 
+function normalizeProfile(profile: Partial<Profile> | null): Profile | null {
+  if (!profile) return null;
+  return {
+    name: profile.name || '',
+    village: profile.village || '',
+    image: profile.image,
+    backgroundImage: profile.backgroundImage,
+  };
+}
+
 export const Storage = {
   // profile
-  getProfile: () => getJSON<Profile | null>(K.profile, null),
-  saveProfile: (p: Profile) => setJSON(K.profile, p),
+  getProfile: async () => normalizeProfile(await getJSON<Profile | null>(K.profile, null)),
+  saveProfile: (p: Profile) => setJSON(K.profile, normalizeProfile(p)),
 
   // cards
   getCards: async () => (await getJSON<Card[]>(K.cards, [])).map(normalizeCard),

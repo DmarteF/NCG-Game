@@ -164,7 +164,6 @@ export default function OnlineBattle() {
         setOppInitialCT(p.ct);
       } else if (p.action === 'start_decision') {
         // Guest receives starter from host
-        setMyInitialCT((mine) => mine); // noop
         setPhase('play');
         setCurrentTurn(p.starter === role ? 'me' : 'opp');
         setTimeLeft(turnSeconds);
