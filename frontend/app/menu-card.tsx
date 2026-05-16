@@ -71,6 +71,12 @@ export default function MenuCard() {
       card.movementRange || '',
       card.summonType || '',
       card.targetShape || '',
+      card.sensoryType || '',
+      card.detectsInvisibility ? 'detecta invisibilidade' : '',
+      card.detectsChakra ? 'detecta chakra energia' : '',
+      card.detectsPresence ? 'detecta presença' : '',
+      card.tracksTarget ? 'rastreia alvo' : '',
+      card.tracksMovement ? 'rastreia movimento' : '',
     ].join(' ').toLowerCase();
     const queryOk = !normalizedQuery || haystack.includes(normalizedQuery);
     const rankOk = cardRanks.length === 0 || cardRanks.includes(card.rank || 'E');
@@ -242,6 +248,14 @@ function describeCardEffects(card: Card): string {
   }
   if (card.actionType === 'diverse_summon' || card.cardType === 'invocação diversa') {
     parts.push(`Invocação diversa${card.summonType ? `: ${card.summonType}` : ''}${card.summonQuantity ? ` • qtd ${formatNumberBR(card.summonQuantity)}` : ''}`);
+  }
+  if (card.actionType === 'perception' || card.cardType === 'percepção/rastreamento/reação') {
+    parts.push([
+      card.sensoryType ? `Percepção: ${card.sensoryType}` : 'Percepção/reação',
+      card.detectsUntilSpeed != null ? `Detecta Speed ${card.detectsUntilSpeed === 'instant' ? 'Instantânea' : card.detectsUntilSpeed}` : '',
+      card.reactionUntilSpeed != null ? `Reage Speed ${card.reactionUntilSpeed === 'instant' ? 'Instantânea' : card.reactionUntilSpeed}` : '',
+      card.reducesSpeedBy ? `Reduz Speed ${formatNumberBR(card.reducesSpeedBy)}` : '',
+    ].filter(Boolean).join(' • '));
   }
   if (card.maxTargets || card.targetCount || card.targetShape) {
     parts.push([

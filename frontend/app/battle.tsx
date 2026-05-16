@@ -18,12 +18,32 @@ import { PlayerActionAnalysis, resolveBossAttack, resolveBossDefense } from '../
 
 type Team = 'team1' | 'team2';
 type BattleAttrs = Record<Attr, number | 'ilimitado'>;
-type ActiveEffect = { id: string; team: Team; card: Card; remainingTurns?: number };
+type ActiveEffect = { id: string; team: Team; card: Card; remainingTurns?: number; quantityInitial?: number; quantityCurrent?: number };
 
 const emptyBattleAttrs = (): BattleAttrs => ({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
 const ctToBattleAttrs = (ct: CT): BattleAttrs => ({ ...emptyBattleAttrs(), ...ct.attrs, Dur: 0 });
 const BOSS_DIFFICULTY_LABELS: Record<BossDifficulty, string> = { facil: 'Fácil', medio: 'Médio', dificil: 'Difícil', impossivel: 'Impossível' };
 const BOSS_DIFFICULTY_MAX_RANK: Record<BossDifficulty, CardRank> = { facil: 'B', medio: 'A', dificil: 'S', impossivel: 'S' };
+
+function isDiverseSummonCard(card: Card) {
+  return card.actionType === 'diverse_summon' || card.cardType === 'invocação diversa';
+}
+
+function diverseSummonLabel(card: Card) {
+  if (card.summonType === 'clone') return 'clones';
+  if (card.summonType === 'grupo') return 'grupos';
+  if (card.summonType === 'enxame') return 'enxames';
+  if (card.summonType === 'constructo') return 'constructos';
+  if (card.summonType === 'invocação menor') return 'invocações menores';
+  if (card.summonType === 'objeto invocado') return 'objetos invocados';
+  return 'alvos';
+}
+
+function initialDiverseQuantity(card: Card) {
+  if (!isDiverseSummonCard(card)) return undefined;
+  const value = Number(card.summonQuantity || card.targetCount || 0);
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : undefined;
+}
 
 export default function Battle() {
   const router = useRouter();
@@ -200,10 +220,14 @@ export default function Battle() {
   const runBossTurn = () => {
     if (!initCT1 || phase !== 'play') return;
     const playerCT = { ...initCT1, attrs: battleAttrs.team1 as Record<Attr, number> };
-    const attack = resolveBossAttack(bossState, playerCT, battleAttrs.team1, lastBossAnalysisRef.current);
+    const activeDiverseTargets = countActiveDiverseTargets('team1');
+    const bossAnalysis = mergeActiveTargetsIntoAnalysis(lastBossAnalysisRef.current, activeDiverseTargets);
+    const attack = resolveBossAttack(bossState, playerCT, battleAttrs.team1, bossAnalysis);
+    const targetHitLines = applyBossTargetHits(attack);
     const nextBossCT = createBossCT(attack.boss);
+    const targetHitExtra = targetHitLines.length > 0 ? `\n${targetHitLines.join('\n')}` : '';
     const bossExtra = attack.card?.kind === 'attack'
-      ? `ENE restante: ${formatNumberBR(attack.boss.stats.Ene)}\nDano possível: ${formatNumberBR(attack.damagePossible)}\nAguardando resposta do jogador.`
+      ? `ENE restante: ${formatNumberBR(attack.boss.stats.Ene)}\nDano possível: ${formatNumberBR(attack.damagePossible)}${targetHitExtra}\nAguardando resposta do jogador.`
       : `ENE restante: ${formatNumberBR(attack.boss.stats.Ene)}\nAguardando resposta do jogador.`;
     const bossCard = attack.card
       ? bossCardToSnapshot(attack.card, bossExtra)
@@ -220,8 +244,67 @@ export default function Battle() {
       ctSnapshot: nextBossCT,
       finalAttrs: ctToBattleAttrs(nextBossCT),
     };
-    setMessages((m) => [...m, bossMsg]);
+    setMessages((m) => [...m, { ...bossMsg, text: [...attack.lines, ...targetHitLines].join('\n') }]);
     advanceTurn();
+  };
+
+  const applyBossTargetHits = (attack: ReturnType<typeof resolveBossAttack>) => {
+    const card = attack.card;
+    if (!card || card.kind !== 'attack' || !card.maxTargets) return [];
+    let remainingTargets = card.maxTargets;
+    const lines: string[] = [];
+    const nextEffects: ActiveEffect[] = [];
+
+    for (const effect of activeEffects) {
+      if (effect.team !== 'team1' || !isDiverseSummonCard(effect.card) || remainingTargets <= 0) {
+        nextEffects.push(effect);
+        continue;
+      }
+      const current = effect.quantityCurrent ?? initialDiverseQuantity(effect.card) ?? 0;
+      if (current <= 0) {
+        nextEffects.push(effect);
+        continue;
+      }
+
+      const hit = Math.min(current, remainingTargets);
+      const left = current - hit;
+      const label = diverseSummonLabel(effect.card);
+      remainingTargets -= hit;
+      lines.push(`${formatNumberBR(hit)} ${label} foram atingidos/destruídos.`);
+      if (left > 0) {
+        lines.push(`${formatNumberBR(left)} ${label} restantes.`);
+        nextEffects.push({ ...effect, quantityCurrent: left, card: { ...effect.card, summonQuantity: left } });
+      } else {
+        lines.push(`Todos os ${label} foram destruídos.`);
+      }
+    }
+
+    if (lines.length > 0) setActiveEffects(nextEffects);
+    return lines;
+  };
+
+  const countActiveDiverseTargets = (team: Team) => activeEffects.reduce((total, effect) => {
+    if (effect.team !== team || !isDiverseSummonCard(effect.card)) return total;
+    return total + (effect.quantityCurrent ?? initialDiverseQuantity(effect.card) ?? 0);
+  }, 0);
+
+  const mergeActiveTargetsIntoAnalysis = (analysis: PlayerActionAnalysis | undefined, activeTargets: number): PlayerActionAnalysis | undefined => {
+    if (activeTargets <= 0) return analysis;
+    return {
+      isAttack: analysis?.isAttack ?? false,
+      isDefense: analysis?.isDefense ?? false,
+      isGenjutsu: analysis?.isGenjutsu ?? false,
+      isSealing: analysis?.isSealing ?? false,
+      isArea: (analysis?.isArea ?? false) || activeTargets > 3,
+      isInstant: analysis?.isInstant ?? false,
+      declaredKill: analysis?.declaredKill ?? false,
+      cloneCount: Math.max(analysis?.cloneCount ?? 0, activeTargets),
+      declaredTargets: Math.max(analysis?.declaredTargets ?? 1, activeTargets),
+      maxSpeed: analysis?.maxSpeed,
+      attackPower: analysis?.attackPower ?? 0,
+      defensePower: analysis?.defensePower ?? 0,
+      text: analysis?.text ?? '',
+    };
   };
 
   useEffect(() => {
@@ -241,10 +324,35 @@ export default function Battle() {
   const registerPersistentEffects = (playedCards: Card[], keptActiveEffectIds: string[]) => {
     const persistent = playedCards.filter(card => card.durationType && card.durationType !== 'instantâneo');
     setActiveEffects((effects) => {
-      let next = effects.filter(effect => effect.team !== currentTeam || keptActiveEffectIds.includes(effect.id));
+      const playedById = new Map(playedCards.map(card => [card.id, card]));
+      let next = effects
+        .filter(effect => effect.team !== currentTeam || keptActiveEffectIds.includes(effect.id))
+        .map((effect) => {
+          if (effect.team !== currentTeam) return effect;
+          const played = playedById.get(effect.card.id);
+          if (!played) return effect;
+          const quantityCurrent = effect.quantityCurrent ?? initialDiverseQuantity(effect.card);
+          return {
+            ...effect,
+            quantityCurrent,
+            quantityInitial: effect.quantityInitial ?? quantityCurrent,
+            card: {
+              ...played,
+              summonQuantity: quantityCurrent ?? played.summonQuantity,
+            },
+          };
+        });
       persistent.forEach((card, index) => {
         if (next.some(effect => effect.team === currentTeam && effect.card.id === card.id)) return;
-        next.push({ id: `${card.id}:${Date.now()}:${index}`, team: currentTeam, card, remainingTurns: card.durationType === 'turnos' ? card.durationTurns || 0 : undefined });
+        const quantity = initialDiverseQuantity(card);
+        next.push({
+          id: `${card.id}:${Date.now()}:${index}`,
+          team: currentTeam,
+          card: quantity ? { ...card, summonQuantity: quantity } : card,
+          remainingTurns: card.durationType === 'turnos' ? card.durationTurns || 0 : undefined,
+          quantityInitial: quantity,
+          quantityCurrent: quantity,
+        });
       });
       return next;
     });
@@ -424,10 +532,13 @@ function ActiveCardsBar({ effects, onDisable }: { effects: ActiveEffect[]; onDis
         const card = effect.card;
         const upkeep = ATTRS.filter(a => card.upkeepCost?.[a] != null).map(a => `${a}:${formatNumberBR(card.upkeepCost?.[a])}`).join(' • ');
         const boost = ATTRS.filter(a => card.boost?.[a] != null).map(a => `${a}:${formatNumberBR(card.boost?.[a])}`).join(' • ');
+        const quantity = effect.quantityCurrent ?? initialDiverseQuantity(card);
+        const quantityInitial = effect.quantityInitial ?? quantity;
         return (
           <View key={effect.id} style={styles.activeItem}>
             <Text style={styles.cardName}>{card.name} • {card.cardType || 'técnica'}</Text>
             <Text style={styles.obs}>Duração: {card.durationType === 'turnos' ? `por turnos (${effect.remainingTurns || 0})` : 'persistente'}{upkeep ? ` • Custo/turno: ${upkeep}` : ''}</Text>
+            {quantity ? <Text style={styles.obs}>Quantidade: {formatNumberBR(quantity)}{quantityInitial ? `/${formatNumberBR(quantityInitial)}` : ''}</Text> : null}
             {boost ? <Text style={styles.obs}>Bônus ativo: {boost}</Text> : null}
             <Pressable onPress={() => onDisable(effect.id)} style={styles.activeDisable}><Text style={styles.activeDisableText}>Desativar</Text></Pressable>
           </View>
@@ -539,10 +650,25 @@ function renderEffectLines(c: Card, action?: MomentaryAction) {
   const cost = ATTRS.filter(a => c.cost[a] != null).map(a => `${a}: ${formatNumberBR(c.cost[a])}`).join(', ');
   const boost = ATTRS.filter(a => c.boost[a] != null).map(a => `${a}: ${formatNumberBR(c.boost[a])}`).join(', ');
   const unl = ATTRS.filter(a => c.unlimited[a]).map(a => `${a}: ilimitado`).join(', ');
+  const speedValue = (value?: Card['speed']) => value === 'instant' ? 'Instantânea' : value != null ? String(value) : '';
   if (c.actionType === 'movement' || c.cardType === 'movimentação') {
     lines.push('Tipo: Movimentação');
     if (c.movementType) lines.push(`Movimento: ${c.movementType}`);
     if (c.movementRange) lines.push(`Alcance: ${c.movementRange}`);
+  }
+  if (c.actionType === 'perception' || c.cardType === 'percepção/rastreamento/reação') {
+    lines.push(`Tipo: ${c.sensoryType || 'Percepção/reação'}`);
+    if (c.detectsUntilSpeed != null) lines.push(`Detecta até Speed: ${speedValue(c.detectsUntilSpeed)}`);
+    if (c.reactionUntilSpeed != null) lines.push(`Permite reação até Speed: ${speedValue(c.reactionUntilSpeed)}`);
+    if (c.reducesSpeedBy) lines.push(`Reduz Speed em: ${formatNumberBR(c.reducesSpeedBy)}`);
+    const flags = [
+      c.detectsInvisibility ? 'detecta invisibilidade' : '',
+      c.detectsChakra ? 'detecta chakra/energia' : '',
+      c.detectsPresence ? 'detecta presença' : '',
+      c.tracksTarget ? 'rastreia alvo' : '',
+      c.tracksMovement ? 'rastreia movimento' : '',
+    ].filter(Boolean).join(' • ');
+    if (flags) lines.push(`Capacidades: ${flags}`);
   }
   if (c.actionType === 'diverse_summon' || c.cardType === 'invocação diversa') {
     lines.push(`Tipo: Invocação diversa${c.summonType ? ` / ${c.summonType}` : ''}`);
@@ -701,7 +827,7 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
     return ai - bi;
   }).filter((c) => {
     const q = cardQuery.trim().toLowerCase();
-    const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''} ${c.cardType || ''} ${c.actionType || ''} ${c.movementType || ''} ${c.movementRange || ''} ${c.summonType || ''} ${c.targetShape || ''} ${formatSpeed(c.speed)}`.toLowerCase().includes(q);
+    const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''} ${c.cardType || ''} ${c.actionType || ''} ${c.movementType || ''} ${c.movementRange || ''} ${c.summonType || ''} ${c.targetShape || ''} ${c.sensoryType || ''} ${c.detectsInvisibility ? 'detecta invisibilidade' : ''} ${c.detectsChakra ? 'detecta chakra energia' : ''} ${c.detectsPresence ? 'detecta presença' : ''} ${c.tracksTarget ? 'rastreia alvo' : ''} ${c.tracksMovement ? 'rastreia movimento' : ''} ${formatSpeed(c.speed)}`.toLowerCase().includes(q);
     const rankOk = cardRanks.length === 0 || cardRanks.includes(c.rank || 'E');
     const bossOk = !bossDifficulty || canBossDifficultyUseCard(bossDifficulty, c);
     return queryOk && rankOk && bossOk && canCTUseCard(activeCT, c);
@@ -808,10 +934,12 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
                     {activeEffects.map(effect => {
                       const selectedAgain = selectedCards.some(card => card.id === effect.card.id);
                       const boost = ATTRS.filter(a => effect.card.boost?.[a] != null).map(a => `${a}:${formatNumberBR(effect.card.boost?.[a])}`).join(' • ');
+                      const quantity = effect.quantityCurrent ?? initialDiverseQuantity(effect.card);
+                      const quantityInitial = effect.quantityInitial ?? quantity;
                       return (
                         <View key={effect.id} style={styles.activeConfirmItem}>
                           <Text style={styles.cardName}>{effect.card.name} • {effect.card.cardType || 'técnica'}</Text>
-                          <Text style={styles.obs}>{selectedAgain ? 'Continua ativo' : 'Será desativado'}{boost ? ` • Bônus: ${boost}` : ''}</Text>
+                          <Text style={styles.obs}>{selectedAgain ? 'Continua ativo' : 'Será desativado'}{boost ? ` • Bônus: ${boost}` : ''}{quantity ? ` • Quantidade: ${formatNumberBR(quantity)}${quantityInitial ? `/${formatNumberBR(quantityInitial)}` : ''}` : ''}</Text>
                           <View style={styles.chipsRow}>
                             <Chip
                               label="Manter ativo"
@@ -940,6 +1068,9 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
       ) : null}
       {card.actionType === 'movement' || card.cardType === 'movimentação' ? (
         <Text style={styles.obs}>Movimentação: {[card.movementType, card.movementRange ? `alcance ${card.movementRange}` : ''].filter(Boolean).join(' • ') || 'sem detalhes'}</Text>
+      ) : null}
+      {card.actionType === 'perception' || card.cardType === 'percepção/rastreamento/reação' ? (
+        <Text style={styles.obs}>Percepção/reação: {[card.sensoryType, card.detectsUntilSpeed != null ? `detecta Speed ${card.detectsUntilSpeed === 'instant' ? 'Instantânea' : card.detectsUntilSpeed}` : '', card.reactionUntilSpeed != null ? `reage Speed ${card.reactionUntilSpeed === 'instant' ? 'Instantânea' : card.reactionUntilSpeed}` : ''].filter(Boolean).join(' • ') || 'sem detalhes'}</Text>
       ) : null}
       {card.actionType === 'diverse_summon' || card.cardType === 'invocação diversa' ? (
         <Text style={styles.obs}>Invocação diversa: {[card.summonType, card.summonQuantity ? `qtd ${formatNumberBR(card.summonQuantity)}` : ''].filter(Boolean).join(' • ') || 'sem detalhes'}</Text>

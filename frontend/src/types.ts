@@ -10,10 +10,10 @@ export type Profile = {
 export type AttrValues = Partial<Record<Attr, number>>;
 export type UnlimitedFlags = Partial<Record<Attr, boolean>>;
 
-export type CardEffect = 'none' | 'cost' | 'boost' | 'cost_boost' | 'unlimited';
+export type CardEffect = 'none' | 'cost' | 'boost' | 'cost_boost' | 'unlimited' | 'cost_unlimited' | 'boost_unlimited' | 'cost_boost_unlimited';
 export type EntityType = 'invocação' | 'marionete' | 'edo tensei';
-export type CardActionType = 'attribute' | 'attack' | 'defense' | 'equipment' | 'mode' | 'entity' | 'movement' | 'diverse_summon';
-export type CardType = 'técnica' | 'modo/buff' | 'arma/equipamento' | 'invocação' | 'edo tensei' | 'marionete' | 'movimentação' | 'invocação diversa';
+export type CardActionType = 'attribute' | 'attack' | 'defense' | 'equipment' | 'mode' | 'entity' | 'movement' | 'diverse_summon' | 'perception';
+export type CardType = 'técnica' | 'modo/buff' | 'arma/equipamento' | 'invocação' | 'edo tensei' | 'marionete' | 'movimentação' | 'invocação diversa' | 'percepção/rastreamento/reação';
 export type DurationType = 'instantâneo' | 'turnos' | 'persistente';
 export type StackBehavior = 'stack' | 'replace';
 export type CardSpeed = number | 'instant';
@@ -22,6 +22,7 @@ export type MovementRange = 'curto' | 'médio' | 'longo' | 'global/dimensional';
 export type MovementType = 'avanço' | 'recuo' | 'esquiva' | 'aproximação' | 'reposicionamento' | 'voo' | 'teleporte' | 'deslocamento dimensional';
 export type DiverseSummonType = 'clone' | 'grupo' | 'enxame' | 'constructo' | 'invocação menor' | 'objeto invocado';
 export type TargetShape = 'único' | 'área' | 'linha' | 'cone' | 'todos ao redor' | 'grupo';
+export type SensoryType = 'percepção' | 'detecção' | 'rastreamento' | 'leitura sensorial' | 'reação' | 'reação instantânea';
 
 export type BossStats = {
   Hp: number;
@@ -44,6 +45,15 @@ export type Card = {
   useCTInfluence?: boolean;
   movementRange?: MovementRange;
   movementType?: MovementType;
+  sensoryType?: SensoryType;
+  detectsUntilSpeed?: CardSpeed;
+  reactionUntilSpeed?: CardSpeed;
+  reducesSpeedBy?: number;
+  detectsInvisibility?: boolean;
+  detectsChakra?: boolean;
+  detectsPresence?: boolean;
+  tracksTarget?: boolean;
+  tracksMovement?: boolean;
   summonType?: DiverseSummonType;
   summonQuantity?: number;
   summonHpIndividual?: number;

@@ -526,10 +526,25 @@ function renderEffectLines(c: Card, action?: MomentaryAction) {
   const cost = ATTRS.filter(a => c.cost[a] != null).map(a => `${a}: ${formatNumberBR(c.cost[a])}`).join(', ');
   const boost = ATTRS.filter(a => c.boost[a] != null).map(a => `${a}: ${formatNumberBR(c.boost[a])}`).join(', ');
   const unl = ATTRS.filter(a => c.unlimited[a]).map(a => `${a}: ilimitado`).join(', ');
+  const speedValue = (value?: Card['speed']) => value === 'instant' ? 'Instantânea' : value != null ? String(value) : '';
   if (c.actionType === 'movement' || c.cardType === 'movimentação') {
     lines.push('Tipo: Movimentação');
     if (c.movementType) lines.push(`Movimento: ${c.movementType}`);
     if (c.movementRange) lines.push(`Alcance: ${c.movementRange}`);
+  }
+  if (c.actionType === 'perception' || c.cardType === 'percepção/rastreamento/reação') {
+    lines.push(`Tipo: ${c.sensoryType || 'Percepção/reação'}`);
+    if (c.detectsUntilSpeed != null) lines.push(`Detecta até Speed: ${speedValue(c.detectsUntilSpeed)}`);
+    if (c.reactionUntilSpeed != null) lines.push(`Permite reação até Speed: ${speedValue(c.reactionUntilSpeed)}`);
+    if (c.reducesSpeedBy) lines.push(`Reduz Speed em: ${formatNumberBR(c.reducesSpeedBy)}`);
+    const flags = [
+      c.detectsInvisibility ? 'detecta invisibilidade' : '',
+      c.detectsChakra ? 'detecta chakra/energia' : '',
+      c.detectsPresence ? 'detecta presença' : '',
+      c.tracksTarget ? 'rastreia alvo' : '',
+      c.tracksMovement ? 'rastreia movimento' : '',
+    ].filter(Boolean).join(' • ');
+    if (flags) lines.push(`Capacidades: ${flags}`);
   }
   if (c.actionType === 'diverse_summon' || c.cardType === 'invocação diversa') {
     lines.push(`Tipo: Invocação diversa${c.summonType ? ` / ${c.summonType}` : ''}`);
@@ -646,7 +661,7 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
     return ai - bi;
   }).filter((c) => {
     const q = cardQuery.trim().toLowerCase();
-    const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''} ${c.cardType || ''} ${c.actionType || ''} ${c.movementType || ''} ${c.movementRange || ''} ${c.summonType || ''} ${c.targetShape || ''} ${formatSpeed(c.speed)}`.toLowerCase().includes(q);
+    const queryOk = !q || `${c.name} ${c.caption} ${c.rank || ''} ${c.cardType || ''} ${c.actionType || ''} ${c.movementType || ''} ${c.movementRange || ''} ${c.summonType || ''} ${c.targetShape || ''} ${c.sensoryType || ''} ${c.detectsInvisibility ? 'detecta invisibilidade' : ''} ${c.detectsChakra ? 'detecta chakra energia' : ''} ${c.detectsPresence ? 'detecta presença' : ''} ${c.tracksTarget ? 'rastreia alvo' : ''} ${c.tracksMovement ? 'rastreia movimento' : ''} ${formatSpeed(c.speed)}`.toLowerCase().includes(q);
     const rankOk = cardRanks.length === 0 || cardRanks.includes(c.rank || 'E');
     return queryOk && rankOk && canCTUseCard(activeCT, c);
   });
@@ -832,6 +847,9 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
       ) : null}
       {card.actionType === 'movement' || card.cardType === 'movimentação' ? (
         <Text style={styles.obs}>Movimentação: {[card.movementType, card.movementRange ? `alcance ${card.movementRange}` : ''].filter(Boolean).join(' • ') || 'sem detalhes'}</Text>
+      ) : null}
+      {card.actionType === 'perception' || card.cardType === 'percepção/rastreamento/reação' ? (
+        <Text style={styles.obs}>Percepção/reação: {[card.sensoryType, card.detectsUntilSpeed != null ? `detecta Speed ${card.detectsUntilSpeed === 'instant' ? 'Instantânea' : card.detectsUntilSpeed}` : '', card.reactionUntilSpeed != null ? `reage Speed ${card.reactionUntilSpeed === 'instant' ? 'Instantânea' : card.reactionUntilSpeed}` : ''].filter(Boolean).join(' • ') || 'sem detalhes'}</Text>
       ) : null}
       {card.actionType === 'diverse_summon' || card.cardType === 'invocação diversa' ? (
         <Text style={styles.obs}>Invocação diversa: {[card.summonType, card.summonQuantity ? `qtd ${formatNumberBR(card.summonQuantity)}` : ''].filter(Boolean).join(' • ') || 'sem detalhes'}</Text>

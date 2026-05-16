@@ -1,7 +1,7 @@
 import { Image } from 'react-native';
 import { formatNumberBR } from './format';
 import { Attr } from './theme';
-import { BossDifficulty, BossStats, Card, CardActionType, CardSpeed, CardType, CT, MovementRange, MovementType, TargetShape } from './types';
+import { BossDifficulty, BossStats, Card, CardActionType, CardSpeed, CardType, CT, MovementRange, MovementType, SensoryType, TargetShape } from './types';
 
 export type BossCardKind = 'perception' | 'mental' | 'movement' | 'defense' | 'equipment' | 'mode' | 'attack';
 
@@ -19,6 +19,15 @@ export type BossCard = {
   targetShape?: TargetShape;
   movementRange?: MovementRange;
   movementType?: MovementType;
+  sensoryType?: SensoryType;
+  detectsUntilSpeed?: CardSpeed;
+  reactionUntilSpeed?: CardSpeed;
+  reducesSpeedBy?: number;
+  detectsInvisibility?: boolean;
+  detectsChakra?: boolean;
+  detectsPresence?: boolean;
+  tracksTarget?: boolean;
+  tracksMovement?: boolean;
   cooldownTurns?: number;
   notes: string;
 };
@@ -66,8 +75,8 @@ export const KAELZOR_BASE_STATS: BossStats = {
 };
 
 export const KAELZOR_BOSS_CARDS: BossCard[] = [
-  { id: 'selo-olho-abissal-boss', name: 'Selo do Olho Abissal', kind: 'perception', rank: 'B', speed: 5, cost: { ENE: 40000 }, notes: 'Acompanha ações até Speed 5 pagando ENE por turno.' },
-  { id: 'olhos-vazio-rachado-boss', name: 'Olhos do Vazio Rachado', kind: 'perception', rank: 'B', speed: 5, cost: { ENE: 60000 }, notes: 'Reação até Speed 5.' },
+  { id: 'selo-olho-abissal-boss', name: 'Selo do Olho Abissal', kind: 'perception', rank: 'B', speed: 5, cost: { ENE: 40000 }, sensoryType: 'percepção', detectsUntilSpeed: 5, reactionUntilSpeed: 5, detectsPresence: true, tracksMovement: true, notes: 'Acompanha ações até Speed 5 pagando ENE por turno.' },
+  { id: 'olhos-vazio-rachado-boss', name: 'Olhos do Vazio Rachado', kind: 'perception', rank: 'B', speed: 5, cost: { ENE: 60000 }, sensoryType: 'reação', detectsUntilSpeed: 5, reactionUntilSpeed: 5, tracksTarget: true, notes: 'Reação até Speed 5.' },
   { id: 'mente-vazia-boss', name: 'Mente Vazia', kind: 'mental', rank: 'B', speed: 5, def: 999999, cost: { ENE: 80000 }, notes: 'Resiste genjutsu comum até Rank B.' },
   { id: 'passo-instavel-boss', name: 'Passo Instável', kind: 'movement', rank: 'B', speed: 3, cost: { ENE: 70000, Ag: 40000 }, movementRange: 'curto', movementType: 'esquiva', notes: 'Esquiva curta do vazio rachado.' },
   { id: 'deslocamento-vazio-rachado-boss', name: 'Deslocamento do Vazio Rachado', kind: 'movement', rank: 'B', speed: 5, cost: { ENE: 120000, Ag: 80000 }, movementRange: 'médio', movementType: 'deslocamento dimensional', notes: 'Reposicionamento rápido até Speed 5.' },
@@ -123,7 +132,8 @@ export function bossCard(id: string) {
 function bossCardType(kind: BossCardKind): { cardType: CardType; actionType: CardActionType } {
   if (kind === 'attack') return { cardType: 'técnica', actionType: 'attack' };
   if (kind === 'movement') return { cardType: 'movimentação', actionType: 'movement' };
-  if (kind === 'defense' || kind === 'mental' || kind === 'perception') return { cardType: 'técnica', actionType: 'defense' };
+  if (kind === 'perception') return { cardType: 'percepção/rastreamento/reação', actionType: 'perception' };
+  if (kind === 'defense' || kind === 'mental') return { cardType: 'técnica', actionType: 'defense' };
   if (kind === 'equipment') return { cardType: 'arma/equipamento', actionType: 'equipment' };
   return { cardType: 'modo/buff', actionType: 'mode' };
 }
@@ -147,6 +157,15 @@ export function bossCardToSnapshot(card: BossCard, extraCaption?: string): Card 
     actionType: type.actionType,
     movementRange: card.movementRange,
     movementType: card.movementType,
+    sensoryType: card.sensoryType,
+    detectsUntilSpeed: card.detectsUntilSpeed,
+    reactionUntilSpeed: card.reactionUntilSpeed,
+    reducesSpeedBy: card.reducesSpeedBy,
+    detectsInvisibility: card.detectsInvisibility,
+    detectsChakra: card.detectsChakra,
+    detectsPresence: card.detectsPresence,
+    tracksTarget: card.tracksTarget,
+    tracksMovement: card.tracksMovement,
     maxTargets: card.maxTargets,
     targetShape: card.targetShape,
     momentaryAttrs: {

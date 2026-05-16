@@ -345,7 +345,7 @@ function TeamPlayModal({ visible, cards, onClose, onConfirm }: { visible: boolea
   }, [visible]);
   const visibleCards = cards.filter(card => {
     const q = query.trim().toLowerCase();
-    return !q || `${card.name} ${card.caption} ${card.rank} ${card.cardType || ''} ${card.actionType || ''} ${card.movementType || ''} ${card.movementRange || ''} ${card.summonType || ''} ${card.targetShape || ''} ${formatSpeed(card.speed)}`.toLowerCase().includes(q);
+    return !q || `${card.name} ${card.caption} ${card.rank} ${card.cardType || ''} ${card.actionType || ''} ${card.movementType || ''} ${card.movementRange || ''} ${card.summonType || ''} ${card.targetShape || ''} ${card.sensoryType || ''} ${card.detectsInvisibility ? 'detecta invisibilidade' : ''} ${card.detectsChakra ? 'detecta chakra energia' : ''} ${card.detectsPresence ? 'detecta presença' : ''} ${card.tracksTarget ? 'rastreia alvo' : ''} ${card.tracksMovement ? 'rastreia movimento' : ''} ${formatSpeed(card.speed)}`.toLowerCase().includes(q);
   });
   const toggle = (card: Card) => setSelected(items => items.some(item => item.id === card.id) ? items.filter(item => item.id !== card.id) : [...items, card]);
   return (

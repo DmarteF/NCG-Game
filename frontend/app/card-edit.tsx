@@ -7,7 +7,7 @@ import Input from '../src/components/Input';
 import ImagePickerField from '../src/components/ImagePickerField';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
-import { Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType, CardType, DurationType, CardSpeed, MovementRange, MovementType, DiverseSummonType, TargetShape } from '../src/types';
+import { Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType, CardType, DurationType, CardSpeed, MovementRange, MovementType, DiverseSummonType, TargetShape, SensoryType } from '../src/types';
 import { ATTRS, Attr, theme, CARD_RANKS, CardRank } from '../src/theme';
 import { Header } from './profile';
 import { formatNumberBR } from '../src/format';
@@ -18,6 +18,9 @@ const EFFECTS: { id: CardEffect; label: string }[] = [
   { id: 'boost', label: 'Possui aumento' },
   { id: 'cost_boost', label: 'Custo e aumento' },
   { id: 'unlimited', label: 'Atributo ilimitado' },
+  { id: 'cost_unlimited', label: 'Custo + ilimitado' },
+  { id: 'boost_unlimited', label: 'Aumento + ilimitado' },
+  { id: 'cost_boost_unlimited', label: 'Custo + aumento + ilimitado' },
 ];
 const ENTITY_TYPES: EntityType[] = ['invocação', 'marionete', 'edo tensei'];
 const CARD_TYPES: { id: CardType; label: string }[] = [
@@ -29,6 +32,7 @@ const CARD_TYPES: { id: CardType; label: string }[] = [
   { id: 'invocação diversa', label: 'Invocação diversa' },
   { id: 'edo tensei', label: 'Edo tensei' },
   { id: 'marionete', label: 'Marionete' },
+  { id: 'percepção/rastreamento/reação', label: 'Percepção/reação' },
 ];
 const DURATIONS: { id: DurationType; label: string }[] = [
   { id: 'instantâneo', label: 'Instantâneo' },
@@ -44,6 +48,7 @@ const ACTION_TYPES: { id: CardActionType; label: string }[] = [
   { id: 'entity', label: 'Invocação' },
   { id: 'movement', label: 'Movimentação' },
   { id: 'diverse_summon', label: 'Invocação diversa' },
+  { id: 'perception', label: 'Percepção/reação' },
 ];
 const MOVEMENT_RANGES: { id: MovementRange; label: string }[] = [
   { id: 'curto', label: 'Curto' },
@@ -77,6 +82,21 @@ const TARGET_SHAPES: { id: TargetShape; label: string }[] = [
   { id: 'todos ao redor', label: 'Todos ao redor' },
   { id: 'grupo', label: 'Grupo' },
 ];
+const SENSORY_TYPES: { id: SensoryType; label: string }[] = [
+  { id: 'percepção', label: 'Percepção' },
+  { id: 'detecção', label: 'Detecção' },
+  { id: 'rastreamento', label: 'Rastreamento' },
+  { id: 'leitura sensorial', label: 'Leitura sensorial' },
+  { id: 'reação', label: 'Reação' },
+  { id: 'reação instantânea', label: 'Reação instantânea' },
+];
+const SENSOR_FLAGS: { key: 'detectsInvisibility' | 'detectsChakra' | 'detectsPresence' | 'tracksTarget' | 'tracksMovement'; label: string }[] = [
+  { key: 'detectsInvisibility', label: 'Detecta invisibilidade' },
+  { key: 'detectsChakra', label: 'Detecta chakra/energia' },
+  { key: 'detectsPresence', label: 'Detecta presença' },
+  { key: 'tracksTarget', label: 'Rastreia alvo' },
+  { key: 'tracksMovement', label: 'Rastreia movimento' },
+];
 const SPEED_OPTIONS: { value: CardSpeed | undefined; label: string }[] = [
   { value: undefined, label: 'Sem Speed' },
   { value: 0, label: 'Speed 0' },
@@ -105,6 +125,11 @@ export default function CardEdit() {
   const [useCTInfluence, setUseCTInfluence] = useState(false);
   const [movementRange, setMovementRange] = useState<MovementRange | undefined>();
   const [movementType, setMovementType] = useState<MovementType | undefined>();
+  const [sensoryType, setSensoryType] = useState<SensoryType | undefined>();
+  const [detectsUntilSpeed, setDetectsUntilSpeed] = useState<CardSpeed | undefined>();
+  const [reactionUntilSpeed, setReactionUntilSpeed] = useState<CardSpeed | undefined>();
+  const [reducesSpeedBy, setReducesSpeedBy] = useState(0);
+  const [sensorFlags, setSensorFlags] = useState<Record<string, boolean>>({});
   const [summonType, setSummonType] = useState<DiverseSummonType | undefined>();
   const [summonQuantity, setSummonQuantity] = useState(0);
   const [summonHpIndividual, setSummonHpIndividual] = useState(0);
@@ -137,6 +162,17 @@ export default function CardEdit() {
         setUseCTInfluence(!!c.useCTInfluence);
         setMovementRange(c.movementRange);
         setMovementType(c.movementType);
+        setSensoryType(c.sensoryType);
+        setDetectsUntilSpeed(normalizeSpeed(c.detectsUntilSpeed));
+        setReactionUntilSpeed(normalizeSpeed(c.reactionUntilSpeed));
+        setReducesSpeedBy(c.reducesSpeedBy || 0);
+        setSensorFlags({
+          detectsInvisibility: !!c.detectsInvisibility,
+          detectsChakra: !!c.detectsChakra,
+          detectsPresence: !!c.detectsPresence,
+          tracksTarget: !!c.tracksTarget,
+          tracksMovement: !!c.tracksMovement,
+        });
         setSummonType(c.summonType);
         setSummonQuantity(c.summonQuantity || 0);
         setSummonHpIndividual(c.summonHpIndividual || 0);
@@ -168,27 +204,36 @@ export default function CardEdit() {
       actionType,
       momentaryAttrs: cleanAttrs(momentaryAttrs),
       useCTInfluence,
-      movementRange,
-      movementType,
-      summonType,
-      summonQuantity: cleanOptionalNum(summonQuantity),
-      summonHpIndividual: cleanOptionalNum(summonHpIndividual),
-      summonHpTotal: cleanOptionalNum(summonHpTotal),
-      summonAtkIndividual: cleanOptionalNum(summonAtkIndividual),
-      summonDefIndividual: cleanOptionalNum(summonDefIndividual),
-      targetCount: cleanOptionalNum(targetCount),
-      maxTargets: cleanOptionalNum(maxTargets),
-      targetShape,
+      movementRange: actionType === 'movement' ? movementRange : undefined,
+      movementType: actionType === 'movement' ? movementType : undefined,
+      sensoryType: actionType === 'perception' ? sensoryType : undefined,
+      detectsUntilSpeed: actionType === 'perception' ? normalizeSpeed(detectsUntilSpeed) : undefined,
+      reactionUntilSpeed: actionType === 'perception' ? normalizeSpeed(reactionUntilSpeed) : undefined,
+      reducesSpeedBy: actionType === 'perception' ? cleanOptionalNum(reducesSpeedBy) : undefined,
+      detectsInvisibility: actionType === 'perception' ? !!sensorFlags.detectsInvisibility : undefined,
+      detectsChakra: actionType === 'perception' ? !!sensorFlags.detectsChakra : undefined,
+      detectsPresence: actionType === 'perception' ? !!sensorFlags.detectsPresence : undefined,
+      tracksTarget: actionType === 'perception' ? !!sensorFlags.tracksTarget : undefined,
+      tracksMovement: actionType === 'perception' ? !!sensorFlags.tracksMovement : undefined,
+      summonType: actionType === 'diverse_summon' ? summonType : undefined,
+      summonQuantity: actionType === 'diverse_summon' ? cleanOptionalNum(summonQuantity) : undefined,
+      summonHpIndividual: actionType === 'diverse_summon' ? cleanOptionalNum(summonHpIndividual) : undefined,
+      summonHpTotal: actionType === 'diverse_summon' ? cleanOptionalNum(summonHpTotal) : undefined,
+      summonAtkIndividual: actionType === 'diverse_summon' ? cleanOptionalNum(summonAtkIndividual) : undefined,
+      summonDefIndividual: actionType === 'diverse_summon' ? cleanOptionalNum(summonDefIndividual) : undefined,
+      targetCount: showTargeting ? cleanOptionalNum(targetCount) : undefined,
+      maxTargets: showTargeting ? cleanOptionalNum(maxTargets) : undefined,
+      targetShape: showTargeting ? targetShape : undefined,
       durationType,
       durationTurns: sanitizeNum(String(durationTurns)),
-      upkeepCost: cleanAttrs(upkeepCost),
+      upkeepCost: durationType !== 'instantâneo' ? cleanAttrs(upkeepCost) : {},
       effect,
       entityType: ['invocação', 'edo tensei', 'marionete'].includes(cardType) ? (cardType as EntityType) : entityType,
-      entityAttrs: entityType ? entityAttrs : undefined,
+      entityAttrs: showEntityFields && entityType ? entityAttrs : undefined,
       entityUnlimited: undefined,
-      cost: cleanAttrs(cost),
-      boost: cleanAttrs(boost),
-      unlimited,
+      cost: showCost ? cleanAttrs(cost) : {},
+      boost: showBoost ? cleanAttrs(boost) : {},
+      unlimited: showUnlimited ? unlimited : {},
     };
     const list = await Storage.getCards();
     const next = id ? list.map(x => x.id === id ? card : x) : [...list, card];
@@ -197,6 +242,11 @@ export default function CardEdit() {
   };
 
   const showMomentary = actionType === 'attack' || actionType === 'defense' || actionType === 'equipment';
+  const showCost = effectHasCost(effect);
+  const showBoost = effectHasBoost(effect);
+  const showUnlimited = effectHasUnlimited(effect);
+  const showTargeting = actionType === 'attack' || actionType === 'diverse_summon';
+  const showEntityFields = actionType === 'entity' || ['invocação', 'edo tensei', 'marionete'].includes(cardType);
 
   return (
     <Screen testID="card-edit-screen">
@@ -248,6 +298,10 @@ export default function CardEdit() {
                 setActionType('diverse_summon');
                 setEntityType(undefined);
               }
+              if (t.id === 'percepção/rastreamento/reação') {
+                setActionType('perception');
+                setEntityType(undefined);
+              }
               if (['invocação', 'edo tensei', 'marionete'].includes(t.id)) {
                 setActionType('entity');
                 setEntityType(t.id as EntityType);
@@ -271,6 +325,10 @@ export default function CardEdit() {
               if (a.id === 'movement') setCardType('movimentação');
               if (a.id === 'diverse_summon') {
                 setCardType('invocação diversa');
+                setEntityType(undefined);
+              }
+              if (a.id === 'perception') {
+                setCardType('percepção/rastreamento/reação');
                 setEntityType(undefined);
               }
               if (a.id !== 'entity' && entityType && actionType === 'entity') setEntityType(undefined);
@@ -330,16 +388,71 @@ export default function CardEdit() {
         </View>
       ) : null}
 
-      <Text style={styles.label}>Alvos / área</Text>
-      <View style={styles.chipsRow}>
-        {TARGET_SHAPES.map(option => (
-          <Chip key={option.id} label={option.label} active={targetShape === option.id} onPress={() => setTargetShape(option.id)} testID={`target-shape-${option.id}`} />
-        ))}
-      </View>
-      <Input label={`Alvos declarados/criados (${formatNumberBR(targetCount)})`} value={String(targetCount)} onChangeText={(t) => setTargetCount(sanitizeNum(t))} keyboardType="numeric" testID="target-count-input" />
-      <Input label={`Máximo de alvos atingidos (${formatNumberBR(maxTargets)})`} value={String(maxTargets)} onChangeText={(t) => setMaxTargets(sanitizeNum(t))} keyboardType="numeric" testID="max-targets-input" />
+      {actionType === 'perception' ? (
+        <View>
+          <Text style={styles.label}>Tipo sensorial</Text>
+          <View style={styles.chipsRow}>
+            {SENSORY_TYPES.map(option => (
+              <Chip key={option.id} label={option.label} active={sensoryType === option.id} onPress={() => setSensoryType(option.id)} testID={`sensory-type-${option.id}`} />
+            ))}
+          </View>
 
-      {actionType !== 'diverse_summon' ? (
+          <Text style={styles.label}>Detecta até Speed</Text>
+          <View style={styles.chipsRow}>
+            {SPEED_OPTIONS.map(option => (
+              <Chip
+                key={`detect-${String(option.value ?? 'none')}`}
+                label={option.label}
+                active={detectsUntilSpeed === option.value}
+                onPress={() => setDetectsUntilSpeed(option.value)}
+                testID={`detects-speed-${String(option.value ?? 'none')}`}
+              />
+            ))}
+          </View>
+
+          <Text style={styles.label}>Permite reação até Speed</Text>
+          <View style={styles.chipsRow}>
+            {SPEED_OPTIONS.map(option => (
+              <Chip
+                key={`reaction-${String(option.value ?? 'none')}`}
+                label={option.label}
+                active={reactionUntilSpeed === option.value}
+                onPress={() => setReactionUntilSpeed(option.value)}
+                testID={`reaction-speed-${String(option.value ?? 'none')}`}
+              />
+            ))}
+          </View>
+
+          <Input label={`Reduz Speed em (${formatNumberBR(reducesSpeedBy)})`} value={String(reducesSpeedBy)} onChangeText={(t) => setReducesSpeedBy(sanitizeNum(t))} keyboardType="numeric" testID="reduces-speed-input" />
+          <Text style={styles.label}>Capacidades</Text>
+          <View style={styles.chipsRow}>
+            {SENSOR_FLAGS.map(flag => (
+              <Chip
+                key={flag.key}
+                label={flag.label}
+                active={!!sensorFlags[flag.key]}
+                onPress={() => setSensorFlags(flags => ({ ...flags, [flag.key]: !flags[flag.key] }))}
+                testID={`sensor-flag-${flag.key}`}
+              />
+            ))}
+          </View>
+        </View>
+      ) : null}
+
+      {showTargeting ? (
+        <View>
+          <Text style={styles.label}>Alvos / área</Text>
+          <View style={styles.chipsRow}>
+            {TARGET_SHAPES.map(option => (
+              <Chip key={option.id} label={option.label} active={targetShape === option.id} onPress={() => setTargetShape(option.id)} testID={`target-shape-${option.id}`} />
+            ))}
+          </View>
+          <Input label={`Alvos declarados/criados (${formatNumberBR(targetCount)})`} value={String(targetCount)} onChangeText={(t) => setTargetCount(sanitizeNum(t))} keyboardType="numeric" testID="target-count-input" />
+          <Input label={`Máximo de alvos atingidos (${formatNumberBR(maxTargets)})`} value={String(maxTargets)} onChangeText={(t) => setMaxTargets(sanitizeNum(t))} keyboardType="numeric" testID="max-targets-input" />
+        </View>
+      ) : null}
+
+      {showEntityFields ? (
         <>
           <Text style={styles.label}>Entidade invocada</Text>
           <View style={styles.chipsRow}>
@@ -351,7 +464,7 @@ export default function CardEdit() {
         </>
       ) : null}
 
-      {entityType && actionType !== 'diverse_summon' ? (
+      {entityType && showEntityFields ? (
         <View>
           <Text style={styles.label}>Atributos próprios da entidade</Text>
           {ATTRS.map(a => (
@@ -375,9 +488,9 @@ export default function CardEdit() {
         ))}
       </View>
 
-      <AttrEditor label="Custo" values={cost} setValues={setCost} keyPrefix="cost" />
-      <AttrEditor label="Aumento" values={boost} setValues={setBoost} keyPrefix="boost" />
-      <UnlimitedEditor unlimited={unlimited} setUnlimited={setUnlimited} />
+      {showCost ? <AttrEditor label="Custo" values={cost} setValues={setCost} keyPrefix="cost" /> : null}
+      {showBoost ? <AttrEditor label="Aumento" values={boost} setValues={setBoost} keyPrefix="boost" /> : null}
+      {showUnlimited ? <UnlimitedEditor unlimited={unlimited} setUnlimited={setUnlimited} /> : null}
 
       <Text style={styles.label}>Duração persistente</Text>
       <View style={styles.chipsRow}>
@@ -470,6 +583,18 @@ function cleanAttrs(v: AttrValues): AttrValues {
 
 function cleanOptionalNum(value: number): number | undefined {
   return Number.isFinite(value) && value > 0 ? Math.trunc(value) : undefined;
+}
+
+function effectHasCost(effect: CardEffect) {
+  return effect === 'cost' || effect === 'cost_boost' || effect === 'cost_unlimited' || effect === 'cost_boost_unlimited';
+}
+
+function effectHasBoost(effect: CardEffect) {
+  return effect === 'boost' || effect === 'cost_boost' || effect === 'boost_unlimited' || effect === 'cost_boost_unlimited';
+}
+
+function effectHasUnlimited(effect: CardEffect) {
+  return effect === 'unlimited' || effect === 'cost_unlimited' || effect === 'boost_unlimited' || effect === 'cost_boost_unlimited';
 }
 
 const styles = StyleSheet.create({

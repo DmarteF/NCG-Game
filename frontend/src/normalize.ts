@@ -1,16 +1,17 @@
 import { ATTRS, Attr } from './theme';
-import { AttrValues, Card, CardActionType, CardEffect, CardSpeed, CardType, CT, DiverseSummonType, DurationType, EntityType, MovementRange, MovementType, StackBehavior, TargetShape, UnlimitedFlags } from './types';
+import { AttrValues, Card, CardActionType, CardEffect, CardSpeed, CardType, CT, DiverseSummonType, DurationType, EntityType, MovementRange, MovementType, SensoryType, StackBehavior, TargetShape, UnlimitedFlags } from './types';
 
 const emptyAttrs = (): Record<Attr, number> => ({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
 const validEntityTypes: EntityType[] = ['invocação', 'marionete', 'edo tensei'];
-const validCardTypes: CardType[] = ['técnica', 'modo/buff', 'arma/equipamento', 'invocação', 'edo tensei', 'marionete', 'movimentação', 'invocação diversa'];
-const validActionTypes: CardActionType[] = ['attribute', 'attack', 'defense', 'equipment', 'mode', 'entity', 'movement', 'diverse_summon'];
+const validCardTypes: CardType[] = ['técnica', 'modo/buff', 'arma/equipamento', 'invocação', 'edo tensei', 'marionete', 'movimentação', 'invocação diversa', 'percepção/rastreamento/reação'];
+const validActionTypes: CardActionType[] = ['attribute', 'attack', 'defense', 'equipment', 'mode', 'entity', 'movement', 'diverse_summon', 'perception'];
 const validDurationTypes: DurationType[] = ['instantâneo', 'turnos', 'persistente'];
 const validStack: StackBehavior[] = ['stack', 'replace'];
 const validMovementRanges: MovementRange[] = ['curto', 'médio', 'longo', 'global/dimensional'];
 const validMovementTypes: MovementType[] = ['avanço', 'recuo', 'esquiva', 'aproximação', 'reposicionamento', 'voo', 'teleporte', 'deslocamento dimensional'];
 const validDiverseSummonTypes: DiverseSummonType[] = ['clone', 'grupo', 'enxame', 'constructo', 'invocação menor', 'objeto invocado'];
 const validTargetShapes: TargetShape[] = ['único', 'área', 'linha', 'cone', 'todos ao redor', 'grupo'];
+const validSensoryTypes: SensoryType[] = ['percepção', 'detecção', 'rastreamento', 'leitura sensorial', 'reação', 'reação instantânea'];
 
 function cleanAttrValues(values?: AttrValues): AttrValues {
   const out: AttrValues = {};
@@ -38,6 +39,7 @@ function inferCardType(card: Partial<Card>): CardType {
   if (card.actionType === 'mode') return 'modo/buff';
   if (card.actionType === 'movement') return 'movimentação';
   if (card.actionType === 'diverse_summon') return 'invocação diversa';
+  if (card.actionType === 'perception') return 'percepção/rastreamento/reação';
   return 'técnica';
 }
 
@@ -57,14 +59,17 @@ function cleanPositiveNumber(value: unknown) {
 }
 
 function inferEffect(card: Partial<Card>): CardEffect {
-  if (card.effect) return card.effect;
   const hasCost = Object.keys(card.cost || {}).length > 0;
   const hasBoost = Object.keys(card.boost || {}).length > 0;
   const hasUnlimited = Object.keys(card.unlimited || {}).length > 0;
-  if (hasUnlimited) return 'unlimited';
+  if (hasCost && hasBoost && hasUnlimited) return 'cost_boost_unlimited';
+  if (hasCost && hasUnlimited) return 'cost_unlimited';
+  if (hasBoost && hasUnlimited) return 'boost_unlimited';
   if (hasCost && hasBoost) return 'cost_boost';
   if (hasCost) return 'cost';
   if (hasBoost) return 'boost';
+  if (hasUnlimited) return 'unlimited';
+  if (card.effect) return card.effect;
   return 'none';
 }
 
@@ -88,6 +93,8 @@ export function normalizeCard(card: Partial<Card>): Card {
         ? 'movement'
       : cardType === 'invocação diversa'
         ? 'diverse_summon'
+      : cardType === 'percepção/rastreamento/reação'
+        ? 'perception'
       : ['invocação', 'edo tensei', 'marionete'].includes(cardType)
         ? 'entity'
         : 'attribute';
@@ -106,6 +113,15 @@ export function normalizeCard(card: Partial<Card>): Card {
     useCTInfluence: !!card.useCTInfluence,
     movementRange: cleanOption(card.movementRange, validMovementRanges),
     movementType: cleanOption(card.movementType, validMovementTypes),
+    sensoryType: cleanOption(card.sensoryType, validSensoryTypes),
+    detectsUntilSpeed: normalizeSpeed(card.detectsUntilSpeed),
+    reactionUntilSpeed: normalizeSpeed(card.reactionUntilSpeed),
+    reducesSpeedBy: cleanPositiveNumber(card.reducesSpeedBy),
+    detectsInvisibility: !!card.detectsInvisibility,
+    detectsChakra: !!card.detectsChakra,
+    detectsPresence: !!card.detectsPresence,
+    tracksTarget: !!card.tracksTarget,
+    tracksMovement: !!card.tracksMovement,
     summonType: cleanOption(card.summonType, validDiverseSummonTypes),
     summonQuantity: cleanPositiveNumber(card.summonQuantity),
     summonHpIndividual: cleanPositiveNumber(card.summonHpIndividual),
