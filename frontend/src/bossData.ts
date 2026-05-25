@@ -63,6 +63,14 @@ export type BossState = {
   lastAttackId?: string;
   activeCardIds: string[];
   cooldowns: Record<string, number>;
+  bossMemory?: {
+    lastPlayerCards: string[];
+    playerUsesClones: boolean;
+    playerUsesGenjutsu: boolean;
+    playerUsesStrongMode: boolean;
+    lastDamageTaken: number;
+    threatScore: number;
+  };
   turn: number;
 };
 
@@ -101,6 +109,14 @@ export function createKaelzorState(difficulty: BossDifficulty = 'facil'): BossSt
     stats: { ...KAELZOR_BASE_STATS },
     activeCardIds: [],
     cooldowns: {},
+    bossMemory: {
+      lastPlayerCards: [],
+      playerUsesClones: false,
+      playerUsesGenjutsu: false,
+      playerUsesStrongMode: false,
+      lastDamageTaken: 0,
+      threatScore: 0,
+    },
     turn: 1,
   };
 }

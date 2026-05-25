@@ -29,7 +29,7 @@ export default function BossOnlineLobby() {
   const [busy, setBusy] = useState(false);
   const [errMsg, setErrMsg] = useState('');
 
-  const goWithProfile = async (role: 'host' | 'guest', roomCode: string) => {
+  const goWithProfile = async (role: 'host' | 'guest' | 'spectator', roomCode: string) => {
     const p = await Storage.getProfile();
     router.replace({
       pathname: '/team-online-battle',
@@ -44,6 +44,7 @@ export default function BossOnlineLobby() {
         matchType,
         team: 'team1',
         leader: role === 'host' ? '1' : '0',
+        spectator: role === 'spectator' ? '1' : '0',
       },
     });
   };
@@ -71,7 +72,7 @@ export default function BossOnlineLobby() {
       setBusy(true);
       const info = await apiCheckRoom(c);
       setBusy(false);
-      if (info.full) { setErrMsg('Sala cheia.'); return Alert.alert('Sala cheia', 'Esta sala já está cheia.'); }
+      if (info.full) return goWithProfile('spectator', c);
       await goWithProfile('guest', c);
     } catch (e: any) {
       setBusy(false);
@@ -127,7 +128,8 @@ export default function BossOnlineLobby() {
             testID="boss-online-code-input"
           />
           {errMsg ? <Text style={styles.errorText} testID="boss-online-error-text">{errMsg}</Text> : null}
-          <Button title="Entrar" onPress={joinRoom} loading={busy} testID="boss-online-join-btn" />
+          <Button title="Entrar como jogador" onPress={joinRoom} loading={busy} testID="boss-online-join-btn" />
+          <Button title="Entrar como espectador" variant="secondary" onPress={() => goWithProfile('spectator', code.trim().toUpperCase())} disabled={code.trim().length < 4} testID="boss-online-spectator-btn" />
           <Pressable onPress={() => setMode('home')} testID="boss-online-back-mode-btn-2"><Text style={styles.back}>Voltar</Text></Pressable>
         </View>
       ) : null}

@@ -230,7 +230,18 @@ export function resolveBossDefense(
 
   const rawDamage = Math.max(0, analysis.attackPower - defenseValue);
   const damageTaken = analysis.isGenjutsu && defense?.id === 'mente-vazia-boss' ? 0 : rawDamage;
-  nextBoss = { ...nextBoss, stats: { ...nextBoss.stats, Hp: Math.max(0, nextBoss.stats.Hp - damageTaken) } };
+  nextBoss = {
+    ...nextBoss,
+    stats: { ...nextBoss.stats, Hp: Math.max(0, nextBoss.stats.Hp - damageTaken) },
+    bossMemory: {
+      lastPlayerCards: playedCards.map(item => item.cardSnapshot.name).slice(-5),
+      playerUsesClones: analysis.cloneCount > 0 || !!nextBoss.bossMemory?.playerUsesClones,
+      playerUsesGenjutsu: analysis.isGenjutsu || !!nextBoss.bossMemory?.playerUsesGenjutsu,
+      playerUsesStrongMode: playedCards.some(item => item.cardSnapshot.actionType === 'mode' || item.cardSnapshot.cardType === 'modo/buff') || !!nextBoss.bossMemory?.playerUsesStrongMode,
+      lastDamageTaken: damageTaken,
+      threatScore: Math.max(0, Math.floor(damageTaken / 50000) + analysis.cloneCount + (analysis.isGenjutsu ? 5 : 0) + (analysis.isSealing ? 5 : 0) + (analysis.maxSpeed === 'instant' ? 8 : Number(analysis.maxSpeed || 0))),
+    },
+  };
   if (bossDebug) lines.push(`Atk final analisado: ${formatNumberBR(analysis.attackPower)}.`);
   lines.push(`Dano recebido: ${formatNumberBR(damageTaken)}.`);
   lines.push(`HP restante do Boss: ${formatNumberBR(nextBoss.stats.Hp)}.`);
@@ -247,6 +258,7 @@ function cardCost(card: BossCard) {
 function chooseBossAction(boss: BossState, analysis?: PlayerActionAnalysis) {
   const targets = Math.max(1, analysis?.cloneCount || analysis?.declaredTargets || 1);
   const hpRatio = boss.stats.Hp / 500000;
+  const memory = boss.bossMemory;
   const speed = analysis?.maxSpeed === 'instant' ? 99 : analysis?.maxSpeed || 0;
   const available = KAELZOR_BOSS_CARDS.filter(card => canPay(card, boss));
   if (available.length === 0) return undefined;
@@ -260,11 +272,14 @@ function chooseBossAction(boss: BossState, analysis?: PlayerActionAnalysis) {
       if (targets > 1 && (card.maxTargets || 1) >= Math.min(targets, 3)) score += 18;
       if (targets > 3 && (card.maxTargets || 1) >= 20) score += 36;
       if (targets > 50 && (card.maxTargets || 1) >= 100) score += 48;
+      if (memory?.playerUsesClones && (card.maxTargets || 1) > 1) score += 16;
+      if ((memory?.threatScore || 0) > 10) score += 10;
       if (boss.stats.Ene < 250000) score -= Math.floor(cardCost(card) / 20000);
     }
     if (card.kind === 'movement') {
       score += 8;
       if (speed >= 4 || numeric(analysis?.attackPower) > 450000) score += 36;
+      if ((memory?.lastDamageTaken || 0) > 250000) score += 16;
       if (boss.turn % 3 === 0) score += 18;
     }
     if (card.kind === 'defense') {
@@ -272,6 +287,7 @@ function chooseBossAction(boss: BossState, analysis?: PlayerActionAnalysis) {
       if (analysis?.isArea && card.id === 'cupula-vazio-boss') score += 24;
       if (numeric(analysis?.attackPower) > 400000 && card.id === 'reflexo-abissal-boss') score += 20;
       if (hpRatio < 0.45) score += 18;
+      if (memory?.playerUsesStrongMode) score += 8;
     }
     if (card.kind === 'mode' || card.kind === 'equipment' || card.kind === 'perception') {
       if ((boss.activeCardIds || []).includes(card.id)) score -= 100;
@@ -279,9 +295,10 @@ function chooseBossAction(boss: BossState, analysis?: PlayerActionAnalysis) {
       if (boss.turn <= 2) score += 10;
       if (hpRatio < 0.55 && card.kind !== 'perception') score += 16;
       if (speed >= 4 && card.kind === 'perception') score += 24;
+      if (memory?.playerUsesGenjutsu && card.kind === 'perception') score += 8;
     }
     if (card.kind === 'mental') {
-      score += analysis?.isGenjutsu ? 32 : -20;
+      score += analysis?.isGenjutsu || memory?.playerUsesGenjutsu ? 32 : -20;
     }
     return { card, score };
   }).sort((a, b) => b.score - a.score || cardCost(a.card) - cardCost(b.card));

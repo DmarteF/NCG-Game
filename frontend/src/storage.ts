@@ -54,7 +54,7 @@ export const Storage = {
   appendHistory: async (item: BattleHistoryItem) => {
     const h = await getJSON<BattleHistoryItem[]>(K.history, []);
     h.unshift(item);
-    await setJSON(K.history, h.slice(0, 50));
+    await setJSON(K.history, h.slice(0, 3));
   },
 
   getLastPlayedCardIds: () => getJSON<string[]>(K.lastPlayedCardIds, []),

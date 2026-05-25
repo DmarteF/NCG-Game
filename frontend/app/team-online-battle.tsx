@@ -10,8 +10,8 @@ import { ctDisplayName, formatNumberBR, formatSpeed } from '../src/format';
 import { TeamParticipant, TeamRoomClient, TeamWSEvent } from '../src/online';
 import { withRemoteImageCard, withRemoteImageCT } from '../src/remoteImages';
 import { Storage, uid } from '../src/storage';
-import { ATTRS, Attr, theme } from '../src/theme';
-import { Card, CT, MatchType, PlayedCard } from '../src/types';
+import { ATTRS, Attr, CARD_RANK_ORDER, CardRank, theme } from '../src/theme';
+import { BossDifficulty, Card, CT, MatchType, PlayedCard } from '../src/types';
 import { Header } from './profile';
 
 type Team = 'team1' | 'team2';
@@ -32,24 +32,29 @@ const TEAM_MATCHES: MatchType[] = ['1x2', '2x2', '2x3', '3x3'];
 export default function TeamOnlineBattle() {
   const router = useRouter();
   const params = useLocalSearchParams<{
-    code: string; matchType: MatchType; turnMinutes: string; playerName: string; playerVillage: string; playerImage?: string;
+    code: string; matchType: MatchType; turnMinutes: string; playerName: string; playerVillage: string; playerImage?: string; bossDifficulty?: BossDifficulty;
     team?: Team; leader?: string; bossMode?: string;
+    spectator?: string;
   }>();
   const code = String(params.code || '');
   const matchType = (params.matchType || '2x2') as MatchType;
   const bossMode = params.bossMode === '1' || String(matchType).includes('Boss');
+  const bossDifficulty = params.bossDifficulty || 'facil';
+  const bossMaxRank: Record<BossDifficulty, CardRank> = { facil: 'B', medio: 'A', dificil: 'S', impossivel: 'S' };
   const turnMinutes = bossMode ? 30 : parseInt(String(params.turnMinutes || '20'), 10);
   const myId = useMemo(() => uid(), []);
   const myTeam = (params.team || 'team1') as Team;
   const isLeader = params.leader === '1';
+  const isSpectator = params.spectator === '1';
   const me: TeamParticipant = useMemo(() => ({
     id: myId,
     name: String(params.playerName || 'Jogador'),
     village: String(params.playerVillage || '—'),
     image: params.playerImage || undefined,
     team: myTeam,
-    leader: isLeader,
-  }), [isLeader, myId, myTeam, params.playerImage, params.playerName, params.playerVillage]);
+    leader: isLeader && !isSpectator,
+    role: isSpectator ? 'spectator' : 'player',
+  }), [isLeader, isSpectator, myId, myTeam, params.playerImage, params.playerName, params.playerVillage]);
   const expectedPlayers = useMemo(() => {
     const [left, right] = matchType.split('x');
     const leftCount = Number(left) || 1;
@@ -65,6 +70,7 @@ export default function TeamOnlineBattle() {
   const [ctByPlayer, setCtByPlayer] = useState<Record<string, CT>>({});
   const [started, setStarted] = useState(false);
   const [currentTeam, setCurrentTeam] = useState<Team | 'boss'>('team1');
+  const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const [turn, setTurn] = useState(1);
   const [messages, setMessages] = useState<TeamMsg[]>([]);
   const [chatText, setChatText] = useState('');
@@ -87,7 +93,7 @@ export default function TeamOnlineBattle() {
     client.onOpen = () => setConnStatus('connected');
     client.onClose = () => { if (!client.closedByUser) setConnStatus('lost'); };
     client.onEvent = handleEvent;
-    client.connect(code, me);
+    client.connect(code, me, isSpectator ? 'spectator' : 'player');
     return () => client.close();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code, myId]);
@@ -115,20 +121,23 @@ export default function TeamOnlineBattle() {
       } else if (payload.action === 'start_team') {
         setStarted(true);
         setCurrentTeam(payload.currentTeam);
+        setCurrentPlayerId(payload.currentPlayerId || null);
         setTurn(payload.turn || 1);
         setMessages((items) => [...items, { id: uid(), team: 'system', turn: payload.turn || 1, text: payload.text, timestamp: Date.now() }]);
       } else if (payload.action === 'play') {
         if (payload.playerId && payload.ct) setCtByPlayer((map) => ({ ...map, [payload.playerId]: payload.ct }));
         setMessages((items) => [...items, { id: uid(), team: payload.team, player: payload.playerName, turn: payload.turn, playedCards: payload.cards, ctSnapshot: payload.ct, finalAttrs: payload.finalAttrs, text: payload.observation, timestamp: Date.now() }]);
-        advanceAfter(payload.team);
+        advanceAfter(payload.team, payload.playerId);
       } else if (payload.action === 'pass') {
         setMessages((items) => [...items, { id: uid(), team: 'system', turn: payload.turn, text: `${payload.playerName} passou pelo time.`, timestamp: Date.now() }]);
-        advanceAfter(payload.team);
+        advanceAfter(payload.team, payload.playerId);
       } else if (payload.action === 'chat') {
         setMessages((items) => [...items, { id: uid(), team: payload.team, player: payload.playerName, turn: payload.turn || turn, text: payload.text, timestamp: payload.timestamp || Date.now() }]);
       } else if (payload.action === 'boss_opening') {
         setMessages((items) => [...items, { id: uid(), team: 'system', turn: payload.turn || 1, text: payload.text, timestamp: Date.now() }]);
         setCurrentTeam('team1');
+        const first = nextBossPlayerAfter(null);
+        setCurrentPlayerId(first?.id || null);
       }
     } else if (event.type === 'error') {
       setConnStatus('error');
@@ -142,7 +151,7 @@ export default function TeamOnlineBattle() {
     relay({ action: 'initial_ct', playerId: myId, ct: await withRemoteImageCT(ct) });
   };
 
-  const teamAg = (team: Team) => participants.filter(p => p.team === team).reduce((sum, p) => sum + Number(ctByPlayer[p.id]?.attrs.Ag || 0), 0);
+  const teamAg = (team: Team) => participants.filter(p => p.role !== 'spectator' && p.team === team).reduce((sum, p) => sum + Number(ctByPlayer[p.id]?.attrs.Ag || 0), 0);
   const pickStarter = (): Team | 'boss' => {
     if (bossMode) return 'boss';
     if (matchType === '1x2') return 'team1';
@@ -153,31 +162,43 @@ export default function TeamOnlineBattle() {
   };
 
   const startMatch = () => {
+    if (isSpectator) return Alert.alert('Espectador', 'Espectadores não podem iniciar a luta.');
     if (!myCT) return Alert.alert('Atenção', 'Confirme seu O C.T inicial.');
-    if (participants.length < expectedPlayers) return Alert.alert('Aguardando', `Este modo precisa de ${expectedPlayers} jogador(es) conectado(s).`);
-    const missing = participants.filter(p => !ctByPlayer[p.id]);
+    const players = participants.filter(p => p.role !== 'spectator');
+    if (players.length < expectedPlayers) return Alert.alert('Aguardando', `Este modo precisa de ${expectedPlayers} jogador(es) conectado(s).`);
+    const missing = players.filter(p => !ctByPlayer[p.id]);
     if (missing.length > 0) return Alert.alert('Aguardando', 'Todos os jogadores conectados precisam confirmar O C.T.');
+    if (bossMode) {
+      const maxRank = bossMaxRank[bossDifficulty];
+      const invalid = players.find(p => CARD_RANK_ORDER[(ctByPlayer[p.id]?.rank || 'E') as CardRank] > CARD_RANK_ORDER[maxRank]);
+      if (invalid) return Alert.alert('Dificuldade inválida', `${invalid.name} precisa trocar o C.T. Esta dificuldade permite apenas C.T até Rank ${maxRank}.`);
+    }
     const starter = pickStarter();
+    const firstPlayer = starter === 'boss' ? null : firstPlayerForTeam(starter);
     const text = starter === 'boss'
       ? 'Kael’Zor começa. O turno do Boss online está preparado para resolução manual/assistida.'
       : `${starter === 'team1' ? 'Time 1' : 'Time 2'} começa. AG total: Time 1 ${formatNumberBR(teamAg('team1'))} • Time 2 ${formatNumberBR(teamAg('team2'))}.`;
     setStarted(true);
     setCurrentTeam(starter);
+    setCurrentPlayerId(firstPlayer?.id || null);
     setMessages((items) => [...items, { id: uid(), team: 'system', turn: 1, text, timestamp: Date.now() }]);
-    relay({ action: 'start_team', currentTeam: starter, turn: 1, text });
+    relay({ action: 'start_team', currentTeam: starter, currentPlayerId: firstPlayer?.id || null, turn: 1, text });
     if (starter === 'boss') {
       setTimeout(() => {
         relay({ action: 'boss_opening', turn: 1, text: 'Boss online: Kael’Zor abre a luta. IA avançada e cartas completas serão refinadas depois; o relay/chat já está pronto.' });
         setMessages((items) => [...items, { id: uid(), team: 'system', turn: 1, text: 'Boss online: Kael’Zor abre a luta. IA avançada e cartas completas serão refinadas depois; o relay/chat já está pronto.', timestamp: Date.now() }]);
+        const first = nextBossPlayerAfter(null);
         setCurrentTeam('team1');
+        setCurrentPlayerId(first?.id || null);
       }, 300);
     }
   };
 
   const canAct = () => {
+    if (isSpectator) return false;
     if (!started) return false;
     if (currentTeam === 'boss') return false;
-    return currentTeam === myTeam;
+    return currentTeam === myTeam && (!currentPlayerId || currentPlayerId === myId);
   };
 
   const enforceCooldown = () => {
@@ -190,9 +211,38 @@ export default function TeamOnlineBattle() {
     return true;
   };
 
-  const advanceAfter = (team: Team) => {
+  const playersForTeam = (team: Team) => participants.filter(p => p.role !== 'spectator' && p.team === team).sort((a, b) => a.name.localeCompare(b.name));
+  const firstPlayerForTeam = (team: Team) => playersForTeam(team)[0];
+  const nextBossPlayerAfter = (playerId: string | null) => {
+    const players = playersForTeam('team1');
+    if (!playerId) return players[0];
+    const index = players.findIndex(p => p.id === playerId);
+    return index >= 0 ? players[index + 1] : players[0];
+  };
+
+  const advanceAfter = (team: Team, playerId?: string) => {
+    if (bossMode) {
+      const nextPlayer = nextBossPlayerAfter(playerId || currentPlayerId);
+      if (nextPlayer) {
+        setCurrentTeam('team1');
+        setCurrentPlayerId(nextPlayer.id);
+        return;
+      }
+      setCurrentTeam('boss');
+      setCurrentPlayerId(null);
+      setTurn((value) => value + 1);
+      setTimeout(() => {
+        const first = nextBossPlayerAfter(null);
+        setMessages((items) => [...items, { id: uid(), team: 'system', turn: turn + 1, text: 'Boss encerrou a rodada. Próximo jogador pode agir.', timestamp: Date.now() }]);
+        relay({ action: 'boss_opening', turn: turn + 1, text: 'Boss encerrou a rodada. Próximo jogador pode agir.' });
+        setCurrentTeam('team1');
+        setCurrentPlayerId(first?.id || null);
+      }, 300);
+      return;
+    }
     const nextTeam = team === 'team1' ? 'team2' : 'team1';
     setCurrentTeam(nextTeam);
+    setCurrentPlayerId(firstPlayerForTeam(nextTeam)?.id || null);
     setTurn((value) => value + 1);
   };
 
@@ -224,14 +274,14 @@ export default function TeamOnlineBattle() {
     setMessages((items) => [...items, msg]);
     relay({ action: 'play', team: myTeam, playerId: myId, playerName: me.name, turn, cards: played, ct: await withRemoteImageCT(nextCT), finalAttrs: resolved.finalAttrs, observation });
     setPlayOpen(false);
-    advanceAfter(myTeam);
+    advanceAfter(myTeam, myId);
   };
 
   const sendPass = () => {
     if (!canAct() || !enforceCooldown()) return;
     setMessages((items) => [...items, { id: uid(), team: 'system', turn, text: `${me.name} passou pelo time.`, timestamp: Date.now() }]);
-    relay({ action: 'pass', team: myTeam, playerName: me.name, turn });
-    advanceAfter(myTeam);
+    relay({ action: 'pass', team: myTeam, playerId: myId, playerName: me.name, turn });
+    advanceAfter(myTeam, myId);
   };
 
   const sendChat = () => {
@@ -251,7 +301,7 @@ export default function TeamOnlineBattle() {
       <View style={styles.statusBox}>
         <Text style={styles.code}>{code}</Text>
         <Text style={styles.status}>{matchType} • {bossMode ? 'Boss começa • 30 min' : `${turnMinutes} min`} • {connStatus}</Text>
-        <Text style={styles.status}>Você: {me.name} • {myTeam === 'team1' ? 'Time 1' : 'Time 2'}</Text>
+        <Text style={styles.status}>Você: {me.name} • {isSpectator ? 'Espectador' : myTeam === 'team1' ? 'Time 1' : 'Time 2'}</Text>
       </View>
 
       <View style={styles.teams}>
@@ -276,7 +326,7 @@ export default function TeamOnlineBattle() {
       ) : (
         <View style={styles.turnBox}>
           <Text style={styles.turnText}>Turno {turn} • {currentTeam === 'boss' ? 'Boss' : currentTeam === 'team1' ? 'Time 1' : 'Time 2'}</Text>
-          <Text style={styles.hint}>{canAct() ? 'Sua equipe pode agir.' : 'Aguardando a equipe da vez.'}</Text>
+          <Text style={styles.hint}>{canAct() ? 'Sua vez de agir.' : isSpectator ? 'Espectador: chat liberado, ações bloqueadas.' : 'Aguardando o jogador da vez.'}</Text>
         </View>
       )}
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Alert, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Alert, Pressable, Modal, ScrollView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Screen from '../src/components/Screen';
@@ -8,6 +8,8 @@ import Input from '../src/components/Input';
 import ImagePickerField from '../src/components/ImagePickerField';
 import { Storage } from '../src/storage';
 import { VILLAGES, theme } from '../src/theme';
+import { BattleHistoryItem } from '../src/types';
+import { copyOrShareHistory, exportHistoryText } from '../src/historyExport';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -15,6 +17,8 @@ export default function ProfileScreen() {
   const [village, setVillage] = useState<string>('');
   const [image, setImage] = useState<string | undefined>();
   const [backgroundImage, setBackgroundImage] = useState<string | undefined>();
+  const [history, setHistory] = useState<BattleHistoryItem[]>([]);
+  const [replay, setReplay] = useState<BattleHistoryItem | null>(null);
 
   useEffect(() => {
     Storage.getProfile().then((p) => {
@@ -25,6 +29,7 @@ export default function ProfileScreen() {
         setBackgroundImage(p.backgroundImage);
       }
     });
+    Storage.getHistory().then(setHistory);
   }, []);
 
   const save = async () => {
@@ -91,10 +96,42 @@ export default function ProfileScreen() {
         <Text style={styles.bgHint}>Usado como fundo global nas telas principais. Se remover, o app volta ao fundo padrão.</Text>
       </View>
 
+      <View style={styles.replayBlock}>
+        <Text style={styles.label}>Últimas lutas / Replays</Text>
+        {history.length === 0 ? <Text style={styles.bgHint}>Nenhuma luta finalizada salva localmente.</Text> : null}
+        {history.map((item, index) => (
+          <View key={item.id} style={styles.replayItem}>
+            <Text style={styles.replayTitle}>{index + 1}. {item.config.matchType} • {new Date(item.endedAt).toLocaleString()}</Text>
+            <Text style={styles.bgHint}>{item.result || 'Sem resultado'}{item.config.bossDifficulty ? ` • Boss ${item.config.bossDifficulty}` : ''}</Text>
+            <View style={styles.replayActions}>
+              <Button title="Ver replay" variant="secondary" small onPress={() => setReplay(item)} />
+              <Button title="Copiar histórico" small onPress={() => copyOrShareHistory(item)} />
+              <Button title="Apagar" variant="ghost" small onPress={async () => {
+                const next = history.filter(saved => saved.id !== item.id);
+                setHistory(next);
+                await Storage.saveHistory(next);
+              }} />
+            </View>
+          </View>
+        ))}
+      </View>
+
       <View style={styles.actions}>
         <Button title="Cancelar" variant="ghost" onPress={() => router.back()} testID="profile-cancel-btn" />
         <Button title="Salvar" onPress={save} testID="profile-save-btn" style={{ flex: 1 }} />
       </View>
+
+      <Modal visible={!!replay} transparent animationType="slide" onRequestClose={() => setReplay(null)}>
+        <View style={styles.modalWrap}>
+          <View style={styles.modalCard}>
+            <Header title="Replay local" onBack={() => setReplay(null)} />
+            <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
+              <Text style={styles.replayText}>{replay ? exportHistoryText(replay) : ''}</Text>
+            </ScrollView>
+            {replay ? <Button title="Copiar histórico" onPress={() => copyOrShareHistory(replay)} /> : null}
+          </View>
+        </View>
+      </Modal>
     </Screen>
   );
 }
@@ -142,5 +179,12 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   bgHint: { color: theme.colors.textMuted, fontSize: 11, lineHeight: 16, textAlign: 'center' },
+  replayBlock: { gap: 8, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: theme.colors.border, borderRadius: theme.radius.lg, padding: 12, marginBottom: 10 },
+  replayItem: { gap: 6, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 10 },
+  replayTitle: { color: '#fff', fontWeight: '900', fontSize: 12 },
+  replayActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  modalWrap: { flex: 1, backgroundColor: theme.colors.overlay, justifyContent: 'flex-end' },
+  modalCard: { height: '86%', backgroundColor: theme.colors.bg, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 14, borderWidth: 1, borderColor: theme.colors.border },
+  replayText: { color: '#fff', fontSize: 12, lineHeight: 18 },
   actions: { flexDirection: 'row', gap: 12, marginTop: 12 },
 });

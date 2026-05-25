@@ -15,6 +15,7 @@ import { ctDisplayName, formatNumberBR, formatSpeed } from '../src/format';
 import { applyUpkeep, resolveCombat, subtractAttrs, visibleFinalAttrs } from '../src/combat';
 import { BossState, bossCardToSnapshot, createBossCT, createKaelzorState } from '../src/bossData';
 import { PlayerActionAnalysis, resolveBossAttack, resolveBossDefense } from '../src/bossRules';
+import { calculationDetailsFor } from '../src/historyExport';
 
 type Team = 'team1' | 'team2';
 type BattleAttrs = Record<Attr, number | 'ilimitado'>;
@@ -51,7 +52,7 @@ export default function Battle() {
   const isBoss = String(matchType || '').includes('Boss');
   const difficulty = bossDifficulty || 'facil';
   const totalMinutes = parseInt(String(turnMinutes || '0'), 10);
-  const turnSeconds = totalMinutes > 0 ? totalMinutes * 60 : 0;
+  const turnSeconds = isBoss ? 30 * 60 : totalMinutes > 0 ? totalMinutes * 60 : 0;
 
   const [cards, setCards] = useState<Card[]>([]);
   const [cts, setCTs] = useState<CT[]>([]);
@@ -83,7 +84,7 @@ export default function Battle() {
 
   // Timer logic
   useEffect(() => {
-    if (phase !== 'play' || isBoss || turnSeconds === 0) return;
+    if (phase !== 'play' || turnSeconds === 0) return;
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
       setTimeLeft((t) => {
@@ -97,7 +98,7 @@ export default function Battle() {
     }, 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, currentTeam, isBoss, turnSeconds]);
+  }, [phase, currentTeam, turnSeconds]);
 
   const t2Label = isBoss ? 'Boss' : 'Time 2';
   const bossCT = createBossCT(bossState);
@@ -115,6 +116,11 @@ export default function Battle() {
       return;
     }
     if (isBoss) {
+      const maxRank = BOSS_DIFFICULTY_MAX_RANK[difficulty];
+      if (CARD_RANK_ORDER[initCT1.rank as CardRank] > CARD_RANK_ORDER[maxRank]) {
+        Alert.alert('Dificuldade inválida', `Esta dificuldade permite apenas C.T até Rank ${maxRank}.`);
+        return;
+      }
       const freshBoss = createKaelzorState(difficulty);
       const freshBossCT = createBossCT(freshBoss);
       setBossState(freshBoss);
@@ -124,7 +130,7 @@ export default function Battle() {
       setActiveEffects([]);
       setCurrentTeam('team2');
       setPhase('play');
-      setTimeLeft(0);
+      setTimeLeft(turnSeconds);
       addSystem('Kael’Zor começa. O Fragmento Selado do Vazio analisa o campo antes dos shinobi.');
       return;
     }
@@ -174,6 +180,7 @@ export default function Battle() {
       id: uid(), turn, team: currentTeam, timestamp: Date.now(),
       playedCards: played, ctSnapshot: ctSnap, activeEntitySnapshot: activeEntity, ctObservation: observation, finalAttrs, finalEntityAttrs, momentaryActions,
     };
+    msg.calculationDetails = calculationDetailsFor(msg);
     if (isBoss && currentTeam === 'team1') {
       const defense = resolveBossDefense(bossState, played, observation, finalAttrs, momentaryActions);
       lastBossAnalysisRef.current = defense.analysis;
@@ -190,6 +197,7 @@ export default function Battle() {
         ctSnapshot: defenseCard ? nextBossCT : undefined,
         finalAttrs: defenseCard ? ctToBattleAttrs(nextBossCT) : undefined,
       };
+      defenseMsg.calculationDetails = calculationDetailsFor(defenseMsg);
       registerPersistentEffects(played.map(p => p.cardSnapshot), keptActiveEffectIds);
       setBossState(defense.boss);
       setBattleAttrs((attrs) => ({ ...attrs, team1: finalAttrs, team2: ctToBattleAttrs(nextBossCT) }));
@@ -244,6 +252,7 @@ export default function Battle() {
       ctSnapshot: nextBossCT,
       finalAttrs: ctToBattleAttrs(nextBossCT),
     };
+    bossMsg.calculationDetails = calculationDetailsFor(bossMsg);
     setMessages((m) => [...m, { ...bossMsg, text: [...attack.lines, ...targetHitLines].join('\n') }]);
     advanceTurn();
   };
@@ -461,8 +470,8 @@ export default function Battle() {
           <Text style={styles.turnTitle}>Turno {turn}</Text>
           <Text style={styles.turnSub}>{currentTeam === 'team1' ? 'Vez de Time 1' : `Vez de ${t2Label}`}</Text>
         </View>
-        <View style={[styles.timerBox, isBoss && { opacity: 0.35 }]}>
-          <Text style={styles.timerText}>{isBoss ? '∞' : fmt(timeLeft)}</Text>
+        <View style={styles.timerBox}>
+          <Text style={styles.timerText}>{fmt(timeLeft)}</Text>
         </View>
       </View>
 
@@ -579,6 +588,7 @@ function CTSelector({ label, cts, value, onChange, testID }: { label: string; ct
 }
 
 function ChatBubble({ msg, t2Label, onImagePress }: { msg: ChatMsg; t2Label: string; onImagePress: (uri: string) => void }) {
+  const [showCalc, setShowCalc] = useState(false);
   if (msg.team === 'system') {
     return (
       <View style={styles.systemRow}>
@@ -636,6 +646,17 @@ function ChatBubble({ msg, t2Label, onImagePress }: { msg: ChatMsg; t2Label: str
                 {ATTRS.map(a => <Text key={a} style={styles.attrLine}>{a}: {formatNumberBR(msg.finalEntityAttrs![a])}</Text>)}
               </View>
             ) : null}
+          </View>
+        ) : null}
+
+        {(msg.calculationDetails?.length || msg.playedCards?.length) ? (
+          <View style={styles.calcBox}>
+            <Pressable onPress={() => setShowCalc(value => !value)} style={styles.calcButton}>
+              <Text style={styles.calcButtonText}>{showCalc ? 'Ocultar cálculo' : 'Ver cálculo'}</Text>
+            </Pressable>
+            {showCalc ? (msg.calculationDetails || calculationDetailsFor(msg)).map((line, index) => (
+              <Text key={index} style={styles.calcLine}>{line}</Text>
+            )) : null}
           </View>
         ) : null}
 
@@ -761,7 +782,7 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
     onImagePress: (uri: string) => void;
     onConfirm: (p: PlayedCard[], ct: CT, obs: string, finalAttrs: Record<Attr, number | 'ilimitado'>, keptActiveEffectIds: string[], activeEntity?: BattleEntity, finalEntityAttrs?: Record<Attr, number | 'ilimitado'>, momentaryActions?: MomentaryAction[]) => void }) {
 
-  const [step, setStep] = useState<'cards' | 'card-edit' | 'target'>('cards');
+  const [step, setStep] = useState<'cards' | 'card-edit' | 'target' | 'checklist'>('cards');
   const [selectedCards, setSelectedCards] = useState<Card[]>([]);
   const [editIdx, setEditIdx] = useState(0);
   const [activeEntityId, setActiveEntityId] = useState<string | null>(null);
@@ -873,6 +894,19 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
     onConfirm(selectedCards.map(c => ({ cardSnapshot: c })), activeCT, obs, resolved.finalAttrs, keptEffectIds, activeEntity, resolved.finalEntityAttrs, resolved.momentaryActions);
   };
 
+  const buildPreview = () => {
+    if (!activeCT) return null;
+    const resolved = resolveCombat(activeCT, activeEntity, selectedCards, activeEntity ? entityCostCardIds : [], activeEntity ? entityBoostCardIds : []);
+    const cost = ATTRS.filter(attr => selectedCards.some(card => card.cost?.[attr] != null)).map(attr => `${attr}: ${formatNumberBR(selectedCards.reduce((sum, card) => sum + Number(card.cost?.[attr] || 0), 0))}`).join(' • ');
+    const mainAtk = resolved.momentaryActions.find(action => action.final.Atk != null)?.final.Atk;
+    const mainSpeed = selectedCards.map(card => card.speed).find(Boolean);
+    const modes = selectedCards.filter(card => card.actionType === 'mode' || card.cardType === 'modo/buff').map(card => card.name).join(', ');
+    const weapons = selectedCards.filter(card => card.actionType === 'equipment' || card.cardType === 'arma/equipamento').map(card => card.name).join(', ');
+    const clones = selectedCards.filter(card => card.actionType === 'diverse_summon' || card.cardType === 'invocação diversa').map(card => `${card.name}${card.summonQuantity ? ` x${formatNumberBR(card.summonQuantity)}` : ''}`).join(', ');
+    const upkeep = selectedCards.flatMap(card => ATTRS.filter(attr => card.upkeepCost?.[attr] != null).map(attr => `${card.name} ${attr}:${formatNumberBR(card.upkeepCost?.[attr])}`)).join(' • ');
+    return { resolved, cost, mainAtk, mainSpeed, modes, weapons, clones, upkeep };
+  };
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.modalWrap}>
@@ -881,7 +915,7 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
             <Text style={styles.modalTitle}>
               {step === 'cards' ? '1. Selecione Cards' :
                step === 'card-edit' ? `2. Editar Card (${editIdx + 1}/${selectedCards.length})` :
-               '3. Alvo e Envio'}
+               step === 'target' ? '3. Alvo e Envio' : '4. Checklist'}
             </Text>
             <Pressable onPress={onClose} testID="modal-close-btn"><Ionicons name="close" size={22} color="#fff" /></Pressable>
           </View>
@@ -1027,12 +1061,37 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
                 />
               </View>
             )}
+
+            {step === 'checklist' && activeCT && (() => {
+              const preview = buildPreview();
+              return (
+                <View style={styles.checklistBox}>
+                  <Text style={styles.label}>Resumo antes de enviar</Text>
+                  <Text style={styles.attrLine}>Cards selecionados: {selectedCards.map(card => card.name).join(', ') || 'nenhum'}</Text>
+                  <Text style={styles.attrLine}>Custo total: {preview?.cost || 'sem custo'}</Text>
+                  <Text style={styles.attrLine}>Alvo do custo: {activeEntity ? activeEntity.name : 'O C.T principal'}</Text>
+                  <Text style={styles.attrLine}>Modos ativos: {preview?.modes || 'nenhum'}</Text>
+                  <Text style={styles.attrLine}>Armas equipadas: {preview?.weapons || 'nenhuma'}</Text>
+                  <Text style={styles.attrLine}>Clones/invocações: {preview?.clones || 'nenhum'}</Text>
+                  <Text style={styles.attrLine}>Atk final principal: {formatNumberBR(preview?.mainAtk || 0)}</Text>
+                  <Text style={styles.attrLine}>Speed principal: {preview?.mainSpeed === 'instant' ? 'Instantânea' : preview?.mainSpeed ?? 'sem Speed'}</Text>
+                  <Text style={styles.attrLine}>Custo por turno: {preview?.upkeep || 'nenhum'}</Text>
+                  {preview?.resolved.finalAttrs ? <Text style={styles.obs}>Após cálculo: {CT_ATTRS.map(attr => `${attr}:${formatNumberBR(preview.resolved.finalAttrs[attr])}`).join(' • ')}</Text> : null}
+                </View>
+              );
+            })()}
           </ScrollView>
 
           <View style={styles.modalFooter}>
             {step === 'cards' && <Button title="Avançar" onPress={goEditCards} testID="play-next-cards" />}
             {step === 'card-edit' && <Button title={editIdx + 1 < selectedCards.length ? 'Próximo card' : 'Escolher alvo'} onPress={finishCardEdits} testID="play-next-card-edit" />}
-            {step === 'target' && <Button title="Enviar Jogada" onPress={confirmPlay} testID="play-confirm-btn" />}
+            {step === 'target' && <Button title="Revisar jogada" onPress={() => setStep('checklist')} testID="play-review-btn" />}
+            {step === 'checklist' && (
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Button title="Voltar e editar" variant="ghost" onPress={() => setStep('target')} style={{ flex: 1 }} testID="play-edit-btn" />
+                <Button title="Confirmar jogada" onPress={confirmPlay} style={{ flex: 1 }} testID="play-confirm-btn" />
+              </View>
+            )}
           </View>
         </View>
       </View>
@@ -1125,6 +1184,10 @@ const styles = StyleSheet.create({
   entityBlock: { backgroundColor: 'rgba(34,197,94,0.08)', padding: 8, borderRadius: 10, marginTop: 6, borderWidth: 1, borderColor: 'rgba(34,197,94,0.25)' },
   attrLine: { color: '#fff', fontSize: 12 },
   obs: { color: theme.colors.textSecondary, fontStyle: 'italic', fontSize: 12, marginTop: 4 },
+  calcBox: { marginTop: 8, gap: 4, borderTopWidth: 1, borderColor: 'rgba(255,255,255,0.12)', paddingTop: 8 },
+  calcButton: { alignSelf: 'flex-start', borderRadius: 8, borderWidth: 1, borderColor: theme.colors.borderActive, paddingHorizontal: 10, paddingVertical: 5 },
+  calcButtonText: { color: theme.colors.neon, fontSize: 11, fontWeight: '900' },
+  calcLine: { color: theme.colors.textSecondary, fontSize: 11, lineHeight: 16 },
   time: { color: theme.colors.textMuted, fontSize: 10, marginTop: 4, textAlign: 'right' },
   activeBar: { gap: 8, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, padding: 10, marginBottom: 8 },
   activeItem: { backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 8, gap: 4 },
@@ -1148,6 +1211,7 @@ const styles = StyleSheet.create({
   pickName: { color: '#fff', fontWeight: '800', fontSize: 14 },
   pickSub: { color: theme.colors.textSecondary, fontSize: 11 },
   chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  checklistBox: { gap: 7, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, padding: 12 },
   inlineRank: { alignSelf: 'flex-start', color: '#fff', backgroundColor: theme.colors.primary, overflow: 'hidden', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1, fontSize: 10, fontWeight: '900', marginTop: 2 },
   inlineRankSpecial: { backgroundColor: theme.colors.gold },
   zoomWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', alignItems: 'center', justifyContent: 'center' },

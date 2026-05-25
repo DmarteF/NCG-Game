@@ -15,6 +15,7 @@ import { RoomClient, WSEvent } from '../src/online';
 import { ctDisplayName, formatNumberBR, formatSpeed } from '../src/format';
 import { withRemoteImageCard, withRemoteImageCT, withRemoteImageEntity } from '../src/remoteImages';
 import { resolveCombat, visibleFinalAttrs } from '../src/combat';
+import { calculationDetailsFor } from '../src/historyExport';
 
 type Side = 'me' | 'opp';
 type PlayerInfo = { name: string; village: string; image?: string };
@@ -32,6 +33,7 @@ type ChatItem = {
   finalAttrs?: Record<Attr, number | 'ilimitado'>;
   finalEntityAttrs?: Record<Attr, number | 'ilimitado'>;
   momentaryActions?: MomentaryAction[];
+  calculationDetails?: string[];
 };
 
 type Phase = 'waiting' | 'init' | 'play' | 'ended';
@@ -170,7 +172,9 @@ export default function OnlineBattle() {
         const starterName = p.starter === role ? me.name : (opponent?.name || 'Oponente');
         setMessages((m) => [...m, { id: uid(), turn: 1, team: 'system', text: `${starterName} começa.`, timestamp: Date.now() }]);
       } else if (p.action === 'play') {
-        setMessages((m) => [...m, { id: uid(), turn: p.turn, team: 'opp', timestamp: Date.now(), playedCards: p.cards, ctSnapshot: p.ct, activeEntitySnapshot: p.activeEntity, ctObservation: p.observation, finalAttrs: p.finalAttrs, finalEntityAttrs: p.finalEntityAttrs, momentaryActions: p.momentaryActions }]);
+        const msg: ChatItem = { id: uid(), turn: p.turn, team: 'opp', timestamp: Date.now(), playedCards: p.cards, ctSnapshot: p.ct, activeEntitySnapshot: p.activeEntity, ctObservation: p.observation, finalAttrs: p.finalAttrs, finalEntityAttrs: p.finalEntityAttrs, momentaryActions: p.momentaryActions };
+        msg.calculationDetails = p.calculationDetails || calculationDetailsFor(msg as any);
+        setMessages((m) => [...m, msg]);
         advanceTurnFromOpponent();
       } else if (p.action === 'chat') {
         setMessages((m) => [...m, { id: uid(), turn: p.turn || turn, team: 'opp', text: String(p.text || ''), timestamp: p.timestamp || Date.now() }]);
@@ -233,9 +237,11 @@ export default function OnlineBattle() {
   const sendPlay = async (played: PlayedCard[], ctSnap: CT, observation: string, finalAttrs: Record<Attr, number | 'ilimitado'>, activeEntity?: BattleEntity, finalEntityAttrs?: Record<Attr, number | 'ilimitado'>, momentaryActions: MomentaryAction[] = []) => {
     if (!canUseTurnAction()) return;
     const myTurn = turn;
-    setMessages((m) => [...m, { id: uid(), turn: myTurn, team: 'me', timestamp: Date.now(), playedCards: played, ctSnapshot: ctSnap, activeEntitySnapshot: activeEntity, ctObservation: observation, finalAttrs, finalEntityAttrs, momentaryActions }]);
+    const localMsg: ChatItem = { id: uid(), turn: myTurn, team: 'me', timestamp: Date.now(), playedCards: played, ctSnapshot: ctSnap, activeEntitySnapshot: activeEntity, ctObservation: observation, finalAttrs, finalEntityAttrs, momentaryActions };
+    localMsg.calculationDetails = calculationDetailsFor(localMsg as any);
+    setMessages((m) => [...m, localMsg]);
     const remoteCards = await Promise.all(played.map(async p => ({ cardSnapshot: await withRemoteImageCard(p.cardSnapshot) })));
-    broadcast({ action: 'play', turn: myTurn, cards: remoteCards, ct: await withRemoteImageCT(ctSnap), activeEntity: await withRemoteImageEntity(activeEntity), observation, finalAttrs, finalEntityAttrs, momentaryActions });
+    broadcast({ action: 'play', turn: myTurn, cards: remoteCards, ct: await withRemoteImageCT(ctSnap), activeEntity: await withRemoteImageEntity(activeEntity), observation, finalAttrs, finalEntityAttrs, momentaryActions, calculationDetails: localMsg.calculationDetails });
     advanceTurnFromMe();
   };
 
@@ -276,7 +282,17 @@ export default function OnlineBattle() {
     if (timerRef.current) clearInterval(timerRef.current);
     setPhase('ended');
     setResult(text);
-    setMessages((m) => [...m, { id: uid(), turn, team: 'system', text, timestamp: Date.now() }]);
+    setMessages((m) => {
+      const next = [...m, { id: uid(), turn, team: 'system' as const, text, timestamp: Date.now() }];
+      Storage.appendHistory({
+        id: uid(),
+        endedAt: Date.now(),
+        result: text,
+        config: { matchType: (params.matchType || '1x1') as MatchType, turnMinutes: totalMinutes, startedAt: Date.now(), bossDifficulty: params.bossDifficulty },
+        messages: next.map((msg) => ({ ...msg, team: msg.team === 'me' ? 'team1' : msg.team === 'opp' ? 'team2' : 'system' })),
+      });
+      return next;
+    });
   };
 
   const sendChat = () => {
@@ -375,8 +391,8 @@ export default function OnlineBattle() {
 
       <FlatList
         ref={listRef}
-        ListHeaderComponent={messages.flatMap((msg) => msg.playedCards || []).map((p) => p.cardSnapshot).filter((card) => card.durationType && card.durationType !== 'instantâneo' && !disabledActiveIds.includes(card.id)).length > 0 ? (
-          <ActiveCardsBar cards={messages.flatMap((msg) => msg.playedCards || []).map((p) => p.cardSnapshot).filter((card) => card.durationType && card.durationType !== 'instantâneo' && !disabledActiveIds.includes(card.id))} onDisable={(id) => setDisabledActiveIds((ids) => [...ids, id])} />
+        ListHeaderComponent={messages.flatMap((msg) => (msg.playedCards || []).map((p) => ({ card: p.cardSnapshot, owner: msg.team }))).filter((entry) => entry.card.durationType && entry.card.durationType !== 'instantâneo' && !disabledActiveIds.includes(`${entry.owner}:${entry.card.id}`)).length > 0 ? (
+          <ActiveCardsBar entries={messages.flatMap((msg) => (msg.playedCards || []).map((p) => ({ card: p.cardSnapshot, owner: msg.team }))).filter((entry) => entry.card.durationType && entry.card.durationType !== 'instantâneo' && !disabledActiveIds.includes(`${entry.owner}:${entry.card.id}`))} onDisable={(entry) => setDisabledActiveIds((ids) => [...ids, `${entry.owner}:${entry.card.id}`])} />
         ) : null}
         data={messages}
         keyExtractor={(i) => i.id}
@@ -418,17 +434,18 @@ export default function OnlineBattle() {
   );
 }
 
-function ActiveCardsBar({ cards, onDisable }: { cards: Card[]; onDisable: (id: string) => void }) {
+function ActiveCardsBar({ entries, onDisable }: { entries: { card: Card; owner: 'me' | 'opp' | 'system' }[]; onDisable: (entry: { card: Card; owner: 'me' | 'opp' | 'system' }) => void }) {
   return (
     <View style={styles.activeBar}>
       <Text style={styles.label}>Ativos da luta</Text>
-      {cards.map(card => {
+      {entries.map(entry => {
+        const card = entry.card;
         const upkeep = ATTRS.filter(a => card.upkeepCost?.[a] != null).map(a => `${a}:${formatNumberBR(card.upkeepCost?.[a])}`).join(' • ');
         return (
-          <View key={card.id} style={styles.activeItem}>
-            <Text style={styles.cardName}>{card.name} • {card.cardType || 'técnica'}</Text>
+          <View key={`${entry.owner}:${card.id}`} style={styles.activeItem}>
+            <Text style={styles.cardName}>{card.name} • {entry.owner === 'me' ? 'seu ativo' : 'ativo do oponente'} • {card.cardType || 'técnica'}</Text>
             <Text style={styles.obs}>Duração: {card.durationType}{card.durationType === 'turnos' ? ` (${card.durationTurns || 0} turnos)` : ''}{upkeep ? ` • Custo/turno: ${upkeep}` : ''}</Text>
-            <Pressable onPress={() => onDisable(card.id)} style={styles.activeDisable}><Text style={styles.activeDisableText}>Desativar</Text></Pressable>
+            {entry.owner === 'me' ? <Pressable onPress={() => onDisable(entry)} style={styles.activeDisable}><Text style={styles.activeDisableText}>Desativar</Text></Pressable> : null}
           </View>
         );
       })}
@@ -465,6 +482,7 @@ function PlayerBadge({ p, label }: { p: { name: string; village: string; image?:
 }
 
 function ChatBubble({ msg, meName, oppName, onImagePress }: { msg: ChatItem; meName: string; oppName: string; onImagePress: (uri: string) => void }) {
+  const [showCalc, setShowCalc] = useState(false);
   if (msg.team === 'system') {
     return <View style={styles.systemRow}><Text style={styles.systemText}>{msg.text}</Text></View>;
   }
@@ -513,6 +531,14 @@ function ChatBubble({ msg, meName, oppName, onImagePress }: { msg: ChatItem; meN
                 {ATTRS.map(a => <Text key={a} style={styles.attrLine}>{a}: {formatNumberBR(msg.finalEntityAttrs![a])}</Text>)}
               </View>
             ) : null}
+          </View>
+        ) : null}
+        {(msg.calculationDetails?.length || msg.playedCards?.length) ? (
+          <View style={styles.calcBox}>
+            <Pressable onPress={() => setShowCalc(value => !value)} style={styles.calcButton}>
+              <Text style={styles.calcButtonText}>{showCalc ? 'Ocultar cálculo' : 'Ver cálculo'}</Text>
+            </Pressable>
+            {showCalc ? (msg.calculationDetails || calculationDetailsFor(msg as any)).map((line, index) => <Text key={index} style={styles.calcLine}>{line}</Text>) : null}
           </View>
         ) : null}
         <Text style={styles.time}>{new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
@@ -621,7 +647,7 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
     onImagePress: (uri: string) => void;
     onConfirm: (p: PlayedCard[], ct: CT, obs: string, finalAttrs: Record<Attr, number | 'ilimitado'>, activeEntity?: BattleEntity, finalEntityAttrs?: Record<Attr, number | 'ilimitado'>, momentaryActions?: MomentaryAction[]) => void }) {
 
-  const [step, setStep] = useState<'cards' | 'card-edit' | 'target'>('cards');
+  const [step, setStep] = useState<'cards' | 'card-edit' | 'target' | 'checklist'>('cards');
   const [selectedCards, setSelectedCards] = useState<Card[]>([]);
   const [editIdx, setEditIdx] = useState(0);
   const [activeEntityId, setActiveEntityId] = useState<string | null>(null);
@@ -686,6 +712,10 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
     Storage.getLastCardCaptions().then((captions) => Storage.saveLastCardCaptions({ ...captions, ...Object.fromEntries(selectedCards.map(c => [c.id, c.caption])) }));
     onConfirm(selectedCards.map(c => ({ cardSnapshot: c })), activeCT, obs, resolved.finalAttrs, activeEntity, resolved.finalEntityAttrs, resolved.momentaryActions);
   };
+  const preview = activeCT ? resolveCombat(activeCT, activeEntity, selectedCards, activeEntity ? entityCostCardIds : [], activeEntity ? entityBoostCardIds : []) : null;
+  const totalCost = ATTRS.filter(attr => selectedCards.some(card => card.cost?.[attr] != null)).map(attr => `${attr}: ${formatNumberBR(selectedCards.reduce((sum, card) => sum + Number(card.cost?.[attr] || 0), 0))}`).join(' • ');
+  const mainAtk = preview?.momentaryActions.find(action => action.final.Atk != null)?.final.Atk || 0;
+  const mainSpeed = selectedCards.map(card => card.speed).find(Boolean);
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
@@ -695,7 +725,7 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
             <Text style={styles.modalTitle}>
               {step === 'cards' ? '1. Selecione Cards' :
                step === 'card-edit' ? `2. Editar Card (${editIdx + 1}/${selectedCards.length})` :
-               '3. Alvo e Envio'}
+               step === 'target' ? '3. Alvo e Envio' : '4. Checklist'}
             </Text>
             <Pressable onPress={onClose} testID="online-modal-close-btn"><Ionicons name="close" size={22} color="#fff" /></Pressable>
           </View>
@@ -806,12 +836,31 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
                 />
               </View>
             )}
+            {step === 'checklist' && activeCT && (
+              <View style={styles.checklistBox}>
+                <Text style={styles.label}>Resumo antes de enviar</Text>
+                <Text style={styles.attrLine}>Cards selecionados: {selectedCards.map(card => card.name).join(', ') || 'nenhum'}</Text>
+                <Text style={styles.attrLine}>Custo total: {totalCost || 'sem custo'}</Text>
+                <Text style={styles.attrLine}>Alvo do custo: {activeEntity ? activeEntity.name : 'O C.T principal'}</Text>
+                <Text style={styles.attrLine}>Modos ativos: {selectedCards.filter(card => card.actionType === 'mode' || card.cardType === 'modo/buff').map(card => card.name).join(', ') || 'nenhum'}</Text>
+                <Text style={styles.attrLine}>Armas equipadas: {selectedCards.filter(card => card.actionType === 'equipment' || card.cardType === 'arma/equipamento').map(card => card.name).join(', ') || 'nenhuma'}</Text>
+                <Text style={styles.attrLine}>Clones/invocações: {selectedCards.filter(card => card.actionType === 'diverse_summon' || card.cardType === 'invocação diversa').map(card => card.name).join(', ') || 'nenhum'}</Text>
+                <Text style={styles.attrLine}>Atk final principal: {formatNumberBR(mainAtk)}</Text>
+                <Text style={styles.attrLine}>Speed principal: {mainSpeed === 'instant' ? 'Instantânea' : mainSpeed ?? 'sem Speed'}</Text>
+              </View>
+            )}
           </ScrollView>
 
           <View style={styles.modalFooter}>
             {step === 'cards' && <Button title="Avançar" onPress={goEditCards} testID="online-play-next-cards" />}
             {step === 'card-edit' && <Button title={editIdx + 1 < selectedCards.length ? 'Próximo card' : 'Escolher alvo'} onPress={finishCardEdits} testID="online-play-next-card-edit" />}
-            {step === 'target' && <Button title="Enviar Jogada" onPress={confirmPlay} testID="online-play-confirm-btn" />}
+            {step === 'target' && <Button title="Revisar jogada" onPress={() => setStep('checklist')} testID="online-play-review-btn" />}
+            {step === 'checklist' && (
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Button title="Voltar e editar" variant="ghost" onPress={() => setStep('target')} style={{ flex: 1 }} testID="online-play-edit-btn" />
+                <Button title="Confirmar jogada" onPress={confirmPlay} style={{ flex: 1 }} testID="online-play-confirm-btn" />
+              </View>
+            )}
           </View>
         </View>
       </View>
@@ -918,6 +967,10 @@ const styles = StyleSheet.create({
   entityBlock: { backgroundColor: 'rgba(34,197,94,0.08)', padding: 8, borderRadius: 10, marginTop: 6, borderWidth: 1, borderColor: 'rgba(34,197,94,0.25)' },
   attrLine: { color: '#fff', fontSize: 12 },
   obs: { color: theme.colors.textSecondary, fontStyle: 'italic', fontSize: 12, marginTop: 4 },
+  calcBox: { marginTop: 8, gap: 4, borderTopWidth: 1, borderColor: 'rgba(255,255,255,0.12)', paddingTop: 8 },
+  calcButton: { alignSelf: 'flex-start', borderRadius: 8, borderWidth: 1, borderColor: theme.colors.borderActive, paddingHorizontal: 10, paddingVertical: 5 },
+  calcButtonText: { color: theme.colors.neon, fontSize: 11, fontWeight: '900' },
+  calcLine: { color: theme.colors.textSecondary, fontSize: 11, lineHeight: 16 },
   time: { color: theme.colors.textMuted, fontSize: 10, marginTop: 4, textAlign: 'right' },
   activeBar: { gap: 8, backgroundColor: 'rgba(255,255,255,0.04)', borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, padding: 10, marginBottom: 8 },
   activeItem: { backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 10, padding: 8, gap: 4 },
@@ -939,6 +992,7 @@ const styles = StyleSheet.create({
   pickName: { color: '#fff', fontWeight: '800', fontSize: 14 },
   pickSub: { color: theme.colors.textSecondary, fontSize: 11 },
   chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  checklistBox: { gap: 7, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, padding: 12 },
   inlineRank: { alignSelf: 'flex-start', color: '#fff', backgroundColor: theme.colors.primary, overflow: 'hidden', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1, fontSize: 10, fontWeight: '900', marginTop: 2 },
   inlineRankSpecial: { backgroundColor: theme.colors.gold },
   zoomWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', alignItems: 'center', justifyContent: 'center' },

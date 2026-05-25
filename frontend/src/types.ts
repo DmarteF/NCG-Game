@@ -136,6 +136,7 @@ export type ChatMsg = {
   finalAttrs?: Record<Attr, number | 'ilimitado'>;
   finalEntityAttrs?: Record<Attr, number | 'ilimitado'>;
   momentaryActions?: MomentaryAction[];
+  calculationDetails?: string[];
 };
 
 export type BattleHistoryItem = {

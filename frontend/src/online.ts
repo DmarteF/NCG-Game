@@ -43,6 +43,7 @@ export type TeamParticipant = {
   image?: string;
   team?: 'team1' | 'team2';
   leader?: boolean;
+  role?: 'player' | 'spectator';
 };
 
 export type TeamWSEvent =
@@ -104,13 +105,13 @@ export class TeamRoomClient {
   onOpen?: () => void;
   onClose?: () => void;
 
-  connect(code: string, player: TeamParticipant) {
+  connect(code: string, player: TeamParticipant, role: 'player' | 'spectator' = player.role || 'player') {
     const url = wsUrl(code);
     const ws = new WebSocket(url);
     this.ws = ws;
     ws.onopen = () => {
       try {
-        ws.send(JSON.stringify({ type: 'hello', role: 'player', player }));
+        ws.send(JSON.stringify({ type: 'hello', role, player: { ...player, role } }));
       } catch {}
       this.onOpen?.();
     };
