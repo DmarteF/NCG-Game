@@ -20,11 +20,23 @@ import { calculationDetailsFor } from '../src/historyExport';
 type Team = 'team1' | 'team2';
 type BattleAttrs = Record<Attr, number | 'ilimitado'>;
 type ActiveEffect = { id: string; team: Team; card: Card; remainingTurns?: number; quantityInitial?: number; quantityCurrent?: number };
+type PendingBossAttack = {
+  card: Card;
+  damagePossible: number;
+  speed?: Card['speed'];
+  targets: number;
+  costText: string;
+  turn: number;
+  intendedTarget: Team;
+};
 
 const emptyBattleAttrs = (): BattleAttrs => ({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
 const ctToBattleAttrs = (ct: CT): BattleAttrs => ({ ...emptyBattleAttrs(), ...ct.attrs, Dur: 0 });
 const BOSS_DIFFICULTY_LABELS: Record<BossDifficulty, string> = { facil: 'Fácil', medio: 'Médio', dificil: 'Difícil', impossivel: 'Impossível' };
 const BOSS_DIFFICULTY_MAX_RANK: Record<BossDifficulty, CardRank> = { facil: 'B', medio: 'A', dificil: 'S', impossivel: 'S' };
+const rankAllowedForBossDifficulty = (difficulty: BossDifficulty, rank: Rank | CardRank) => CARD_RANK_ORDER[rank as CardRank] <= CARD_RANK_ORDER[BOSS_DIFFICULTY_MAX_RANK[difficulty]];
+const bossDifficultyWarning = (difficulty: BossDifficulty) => `Esta dificuldade permite apenas C.T até Rank ${BOSS_DIFFICULTY_MAX_RANK[difficulty]}.`;
+const numericAttr = (value: number | 'ilimitado' | undefined) => typeof value === 'number' && Number.isFinite(value) ? value : 0;
 
 function isDiverseSummonCard(card: Card) {
   return card.actionType === 'diverse_summon' || card.cardType === 'invocação diversa';
@@ -72,6 +84,7 @@ export default function Battle() {
   const [battleAttrs, setBattleAttrs] = useState<Record<Team, BattleAttrs>>({ team1: emptyBattleAttrs(), team2: emptyBattleAttrs() });
   const [bossState, setBossState] = useState<BossState>(() => createKaelzorState(difficulty));
   const [result, setResult] = useState<string>('');
+  const [pendingBossAttack, setPendingBossAttack] = useState<PendingBossAttack | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bossBusyRef = useRef(false);
@@ -109,6 +122,11 @@ export default function Battle() {
     ? { ...(currentTeam === 'team1' ? initCT1! : initCT2!), attrs: battleAttrs[currentTeam] as Record<Attr, number> }
     : null;
   const isAutoBossTurn = isBoss && currentTeam === 'team2';
+  const initCT1InvalidForBoss = !!(isBoss && initCT1 && !rankAllowedForBossDifficulty(difficulty, initCT1.rank));
+
+  useEffect(() => {
+    if (initCT1InvalidForBoss) setInitCT1(null);
+  }, [initCT1InvalidForBoss]);
 
   const startPresentation = () => {
     if (!initCT1 || (!isBoss && !initCT2)) {
@@ -117,7 +135,8 @@ export default function Battle() {
     }
     if (isBoss) {
       const maxRank = BOSS_DIFFICULTY_MAX_RANK[difficulty];
-      if (CARD_RANK_ORDER[initCT1.rank as CardRank] > CARD_RANK_ORDER[maxRank]) {
+      if (!rankAllowedForBossDifficulty(difficulty, initCT1.rank)) {
+        setInitCT1(null);
         Alert.alert('Dificuldade inválida', `Esta dificuldade permite apenas C.T até Rank ${maxRank}.`);
         return;
       }
@@ -126,6 +145,7 @@ export default function Battle() {
       setBossState(freshBoss);
       setInitCT2(freshBossCT);
       lastBossAnalysisRef.current = undefined;
+      setPendingBossAttack(null);
       setBattleAttrs({ team1: ctToBattleAttrs(initCT1), team2: ctToBattleAttrs(freshBossCT) });
       setActiveEffects([]);
       setCurrentTeam('team2');
@@ -182,6 +202,28 @@ export default function Battle() {
     };
     msg.calculationDetails = calculationDetailsFor(msg);
     if (isBoss && currentTeam === 'team1') {
+      const pendingResolution = resolvePendingBossAttack(played, observation, finalAttrs, activeEntity, momentaryActions);
+      if (pendingResolution) {
+        setPendingBossAttack(null);
+        if (pendingResolution.defeated) {
+          const finalText = 'Kael’Zor venceu.';
+          setPhase('ended');
+          setResult(finalText);
+          setBattleAttrs((attrs) => ({ ...attrs, team1: pendingResolution.nextAttrs }));
+          setMessages((m) => {
+            const next = [...m, msg, pendingResolution.message, { id: uid(), turn, team: 'system' as const, text: finalText, timestamp: Date.now() }];
+            Storage.appendHistory({
+              id: uid(), endedAt: Date.now(), result: finalText, messages: next,
+              config: { matchType: matchType as MatchType, turnMinutes: null, startedAt: Date.now(), bossDifficulty: difficulty },
+            });
+            return next;
+          });
+          return;
+        }
+        finalAttrs = pendingResolution.nextAttrs;
+        msg.finalAttrs = pendingResolution.nextAttrs;
+        msg.calculationDetails = calculationDetailsFor(msg);
+      }
       const defense = resolveBossDefense(bossState, played, observation, finalAttrs, momentaryActions);
       lastBossAnalysisRef.current = defense.analysis;
       const nextBossCT = createBossCT(defense.boss);
@@ -215,7 +257,7 @@ export default function Battle() {
         });
         return;
       }
-      setMessages((m) => [...m, msg, defenseMsg]);
+      setMessages((m) => [...m, msg, ...(pendingResolution ? [pendingResolution.message] : []), defenseMsg]);
       advanceTurn();
       return;
     }
@@ -240,6 +282,20 @@ export default function Battle() {
     const bossCard = attack.card
       ? bossCardToSnapshot(attack.card, bossExtra)
       : undefined;
+    if (attack.card?.kind === 'attack' && bossCard && attack.damagePossible > 0) {
+      const costText = Object.entries(attack.card.cost || {}).map(([attr, value]) => `${attr}: ${formatNumberBR(value)}`).join(' • ');
+      setPendingBossAttack({
+        card: bossCard,
+        damagePossible: attack.damagePossible,
+        speed: attack.card.speed,
+        targets: attack.card.maxTargets || 1,
+        costText,
+        turn,
+        intendedTarget: 'team1',
+      });
+    } else {
+      setPendingBossAttack(null);
+    }
     setBossState(attack.boss);
     setBattleAttrs((attrs) => ({ ...attrs, team2: ctToBattleAttrs(nextBossCT) }));
     const bossMsg: ChatMsg = {
@@ -255,6 +311,69 @@ export default function Battle() {
     bossMsg.calculationDetails = calculationDetailsFor(bossMsg);
     setMessages((m) => [...m, { ...bossMsg, text: [...attack.lines, ...targetHitLines].join('\n') }]);
     advanceTurn();
+  };
+
+  const resolvePendingBossAttack = (
+    played: PlayedCard[],
+    observation: string,
+    proposedAttrs: Record<Attr, number | 'ilimitado'>,
+    activeEntity?: BattleEntity,
+    momentaryActions: MomentaryAction[] = [],
+  ) => {
+    if (!pendingBossAttack || pendingBossAttack.intendedTarget !== 'team1') return null;
+    const cardsUsed = played.map(item => item.cardSnapshot);
+    const lowerText = `${observation} ${cardsUsed.map(card => `${card.name} ${card.caption}`).join(' ')}`.toLowerCase();
+    const hasDefenseCard = cardsUsed.some(card => card.actionType === 'defense');
+    const movementCards = cardsUsed.filter(card => card.actionType === 'movement' || card.cardType === 'movimentação');
+    const hasDodgeText = ['defesa', 'defendo', 'bloqueio', 'barreira', 'escudo', 'esquiva', 'desvio', 'substituição', 'substituicao', 'clone', 'invocação', 'invocacao', 'marionete', 'edo'].some(word => lowerText.includes(word));
+    const hasCloneOrSummon = cardsUsed.some(card => isDiverseSummonCard(card) || card.cardType === 'invocação' || card.cardType === 'marionete' || card.cardType === 'edo tensei' || card.entityType) || !!activeEntity;
+    const defBoost = cardsUsed.reduce((sum, card) => sum + Number(card.boost?.Def || 0) + Number(card.momentaryAttrs?.Def || 0), 0);
+    const momentaryDef = momentaryActions.reduce((sum, action) => sum + Number(action.final.Def || 0), 0);
+    const modeDefense = cardsUsed.some(card => (card.actionType === 'mode' || card.cardType === 'modo/buff') && Number(card.boost?.Def || 0) > 0);
+    const perceptionSupportsDefense = cardsUsed.some(card => card.actionType === 'perception' || card.cardType === 'percepção/rastreamento/reação') && (hasDefenseCard || movementCards.length > 0 || hasDodgeText);
+    const hasValidDefense = hasDefenseCard || movementCards.length > 0 || hasCloneOrSummon || modeDefense || perceptionSupportsDefense || (hasDodgeText && (defBoost > 0 || momentaryDef > 0));
+    let defenseValue = Math.max(defBoost, momentaryDef);
+    const pendingSpeed = pendingBossAttack.speed === 'instant' ? 99 : Number(pendingBossAttack.speed || 0);
+    const bestMoveSpeed = movementCards.reduce((best, card) => {
+      const speed = card.speed === 'instant' ? 99 : Number(card.speed || 0);
+      return Math.max(best, speed);
+    }, 0);
+    if (movementCards.length > 0) defenseValue = Math.max(defenseValue, bestMoveSpeed >= pendingSpeed ? pendingBossAttack.damagePossible : Math.floor(pendingBossAttack.damagePossible * 0.5));
+    if (hasCloneOrSummon) defenseValue = Math.max(defenseValue, pendingBossAttack.damagePossible);
+
+    const damageApplied = hasValidDefense ? Math.max(0, pendingBossAttack.damagePossible - defenseValue) : pendingBossAttack.damagePossible;
+    const nextAttrs = { ...proposedAttrs } as BattleAttrs;
+    nextAttrs.Hp = Math.max(0, numericAttr(nextAttrs.Hp) - damageApplied);
+    const hpRemaining = numericAttr(nextAttrs.Hp);
+    const defenseLine = hasValidDefense
+      ? `Jogador usou defesa válida contra ${pendingBossAttack.card.name}.`
+      : `Jogador não apresentou defesa válida contra ${pendingBossAttack.card.name}.`;
+    const lines = [
+      defenseLine,
+      hasValidDefense ? `Defesa: ${formatNumberBR(defenseValue)}.` : '',
+      hasValidDefense ? `Dano reduzido: ${formatNumberBR(damageApplied)}.` : `Dano aplicado: ${formatNumberBR(damageApplied)}.`,
+      `HP restante: ${formatNumberBR(hpRemaining)}.`,
+      hpRemaining <= 0 ? 'Kael’Zor venceu.' : 'A luta continua.',
+    ].filter(Boolean);
+    const message: ChatMsg = {
+      id: uid(),
+      turn,
+      team: 'system',
+      text: lines.join('\n'),
+      timestamp: Date.now(),
+      finalAttrs: nextAttrs,
+      calculationDetails: [
+        `Ataque pendente: ${pendingBossAttack.card.name}.`,
+        `Dano possível: ${formatNumberBR(pendingBossAttack.damagePossible)}.`,
+        `Speed: ${pendingBossAttack.speed === 'instant' ? 'Instantânea' : pendingBossAttack.speed ?? 'sem Speed'}.`,
+        `Alvos: ${formatNumberBR(pendingBossAttack.targets)}.`,
+        pendingBossAttack.costText ? `Custo do Boss: ${pendingBossAttack.costText}.` : '',
+        `Defesa válida: ${hasValidDefense ? 'sim' : 'não'}.`,
+        `Dano final: ${formatNumberBR(damageApplied)}.`,
+        `HP restante: ${formatNumberBR(hpRemaining)}.`,
+      ].filter(Boolean),
+    };
+    return { message, nextAttrs, defeated: hpRemaining <= 0, hasValidDefense };
   };
 
   const applyBossTargetHits = (attack: ReturnType<typeof resolveBossAttack>) => {
@@ -368,6 +487,32 @@ export default function Battle() {
   };
 
   const passTurn = () => {
+    if (isBoss && currentTeam === 'team1' && pendingBossAttack) {
+      const resolution = resolvePendingBossAttack([], 'Jogador passou o turno.', battleAttrs.team1);
+      setPendingBossAttack(null);
+      if (resolution?.defeated) {
+        const finalText = 'Kael’Zor venceu.';
+        setPhase('ended');
+        setResult(finalText);
+        setBattleAttrs((attrs) => ({ ...attrs, team1: resolution.nextAttrs }));
+        setMessages((m) => {
+          const passMsg: ChatMsg = { id: uid(), turn, team: 'system', text: 'Time 1 passou o turno.', timestamp: Date.now() };
+          const next = [...m, passMsg, resolution.message, { id: uid(), turn, team: 'system' as const, text: finalText, timestamp: Date.now() }];
+          Storage.appendHistory({
+            id: uid(), endedAt: Date.now(), result: finalText, messages: next,
+            config: { matchType: matchType as MatchType, turnMinutes: null, startedAt: Date.now(), bossDifficulty: difficulty },
+          });
+          return next;
+        });
+        return;
+      }
+      if (resolution) {
+        setBattleAttrs((attrs) => ({ ...attrs, team1: resolution.nextAttrs }));
+        setMessages((m) => [...m, { id: uid(), turn, team: 'system', text: 'Time 1 passou o turno.', timestamp: Date.now() }, resolution.message]);
+        advanceTurn();
+        return;
+      }
+    }
     deactivateUnselectedActives(currentTeam, `${currentTeam === 'team1' ? 'Time 1' : t2Label} passou o turno.`);
     advanceTurn();
   };
@@ -442,7 +587,14 @@ export default function Battle() {
           <Text style={styles.empty}>Crie pelo menos um C.T antes de iniciar a luta.</Text>
         ) : (
           <>
-            <CTSelector label="Time 1 — O C.T inicial" cts={cts} value={initCT1} onChange={setInitCT1} testID="select-ct1" />
+            <CTSelector
+              label="Time 1 — O C.T inicial"
+              cts={cts}
+              value={initCT1}
+              onChange={setInitCT1}
+              testID="select-ct1"
+              bossDifficulty={isBoss ? difficulty : undefined}
+            />
             {isBoss ? (
               <View style={styles.bossInitCard}>
                 <Text style={styles.cardName}>Kael’Zor — Fragmento Selado do Vazio</Text>
@@ -453,7 +605,7 @@ export default function Battle() {
             ) : (
               <CTSelector label={`${t2Label} — O C.T inicial`} cts={cts} value={initCT2} onChange={setInitCT2} testID="select-ct2" />
             )}
-            <Button title="Iniciar batalha" onPress={startPresentation} testID="start-presentation-btn" style={{ marginTop: 16 }} />
+            <Button title="Iniciar batalha" onPress={startPresentation} disabled={initCT1InvalidForBoss} testID="start-presentation-btn" style={{ marginTop: 16 }} />
           </>
         )}
       </Screen>
@@ -562,23 +714,31 @@ function fmt(s: number) {
   return `${m.toString().padStart(2, '0')}:${r.toString().padStart(2, '0')}`;
 }
 
-function CTSelector({ label, cts, value, onChange, testID }: { label: string; cts: CT[]; value: CT | null; onChange: (c: CT) => void; testID?: string }) {
+function CTSelector({ label, cts, value, onChange, testID, bossDifficulty }: { label: string; cts: CT[]; value: CT | null; onChange: (c: CT) => void; testID?: string; bossDifficulty?: BossDifficulty }) {
   return (
     <View style={{ marginBottom: 16 }}>
       <Text style={styles.label}>{label}</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingVertical: 4 }}>
         {cts.map((c) => {
           const active = value?.id === c.id;
+          const blocked = !!bossDifficulty && !rankAllowedForBossDifficulty(bossDifficulty, c.rank);
           return (
             <Pressable
               key={c.id}
-              onPress={() => onChange(c)}
+              onPress={() => {
+                if (blocked && bossDifficulty) {
+                  Alert.alert('Dificuldade inválida', bossDifficultyWarning(bossDifficulty));
+                  return;
+                }
+                onChange(c);
+              }}
               testID={`${testID}-${c.id}`}
-              style={({ pressed }) => [styles.ctCard, active && styles.ctCardActive, { opacity: pressed ? 0.85 : 1 }]}
+              style={({ pressed }) => [styles.ctCard, active && styles.ctCardActive, blocked && styles.ctCardBlocked, { opacity: blocked ? 0.45 : pressed ? 0.85 : 1 }]}
             >
               {c.image ? <Image source={{ uri: c.image }} style={styles.ctImg} /> : <View style={[styles.ctImg, styles.ctImgFallback]}><Ionicons name="shield" size={26} color={theme.colors.gold} /></View>}
               <Text style={styles.ctName} numberOfLines={1}>{ctDisplayName(c)}</Text>
               <Text style={styles.ctRank}>Rank {c.rank}</Text>
+              {blocked ? <Text style={styles.ctBlockedText}>Bloqueado</Text> : null}
             </Pressable>
           );
         })}
@@ -1159,10 +1319,12 @@ const styles = StyleSheet.create({
 
   ctCard: { width: 130, padding: 10, backgroundColor: theme.colors.surface, borderRadius: theme.radius.lg, borderWidth: 1, borderColor: theme.colors.border, alignItems: 'center', gap: 6 },
   ctCardActive: { borderColor: theme.colors.borderActive, backgroundColor: 'rgba(255,59,0,0.12)' },
+  ctCardBlocked: { borderColor: 'rgba(255,51,68,0.45)', backgroundColor: 'rgba(255,51,68,0.08)' },
   ctImg: { width: 80, height: 80, borderRadius: 12, backgroundColor: theme.colors.bg },
   ctImgFallback: { alignItems: 'center', justifyContent: 'center' },
   ctName: { color: '#fff', fontSize: 13, fontWeight: '800' },
   ctRank: { color: theme.colors.neon, fontSize: 11, fontWeight: '700' },
+  ctBlockedText: { color: theme.colors.danger, fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
   bossInitCard: { backgroundColor: 'rgba(255,59,0,0.08)', borderWidth: 1, borderColor: theme.colors.borderActive, borderRadius: theme.radius.lg, padding: 14, gap: 6, marginBottom: 16 },
   bossThinking: { color: theme.colors.neon, fontSize: 13, fontWeight: '900', textAlign: 'center', flex: 1, paddingVertical: 10 },
 

@@ -146,6 +146,14 @@ export default function TeamOnlineBattle() {
   };
 
   const confirmCT = async (ct: CT) => {
+    if (bossMode) {
+      const maxRank = bossMaxRank[bossDifficulty];
+      if (CARD_RANK_ORDER[ct.rank as CardRank] > CARD_RANK_ORDER[maxRank]) {
+        Alert.alert('Dificuldade inválida', `Esta dificuldade permite apenas C.T até Rank ${maxRank}.`);
+        if (myCT?.id === ct.id) setMyCT(null);
+        return;
+      }
+    }
     setMyCT(ct);
     setCtByPlayer((map) => ({ ...map, [myId]: ct }));
     relay({ action: 'initial_ct', playerId: myId, ct: await withRemoteImageCT(ct) });
@@ -314,10 +322,19 @@ export default function TeamOnlineBattle() {
           <Text style={styles.label}>O C.T inicial</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
             {cts.map(ct => (
-              <Pressable key={ct.id} onPress={() => confirmCT(ct)} style={[styles.ctPick, myCT?.id === ct.id && styles.ctPickActive]}>
+              <Pressable
+                key={ct.id}
+                onPress={() => confirmCT(ct)}
+                style={[
+                  styles.ctPick,
+                  myCT?.id === ct.id && styles.ctPickActive,
+                  bossMode && CARD_RANK_ORDER[ct.rank as CardRank] > CARD_RANK_ORDER[bossMaxRank[bossDifficulty]] && styles.ctPickBlocked,
+                ]}
+              >
                 {ct.image ? <Image source={{ uri: ct.image }} style={styles.ctImg} /> : null}
                 <Text style={styles.ctName}>{ctDisplayName(ct)}</Text>
                 <Text style={styles.small}>AG {formatNumberBR(ct.attrs.Ag)}</Text>
+                {bossMode && CARD_RANK_ORDER[ct.rank as CardRank] > CARD_RANK_ORDER[bossMaxRank[bossDifficulty]] ? <Text style={styles.blockedText}>Bloqueado</Text> : null}
               </Pressable>
             ))}
           </ScrollView>
@@ -450,8 +467,10 @@ const styles = StyleSheet.create({
   label: { color: theme.colors.textMuted, fontSize: 11, fontWeight: '800', textTransform: 'uppercase' },
   ctPick: { width: 120, padding: 8, backgroundColor: theme.colors.surface, borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border },
   ctPickActive: { borderColor: theme.colors.borderActive, backgroundColor: 'rgba(255,59,0,0.12)' },
+  ctPickBlocked: { opacity: 0.45, borderColor: 'rgba(255,51,68,0.45)', backgroundColor: 'rgba(255,51,68,0.08)' },
   ctImg: { width: '100%', height: 58, borderRadius: 8, backgroundColor: theme.colors.bg },
   ctName: { color: '#fff', fontWeight: '800', fontSize: 12, marginTop: 4 },
+  blockedText: { color: theme.colors.danger, fontSize: 10, fontWeight: '900', textTransform: 'uppercase', marginTop: 2 },
   small: { color: theme.colors.textSecondary, fontSize: 11, lineHeight: 15 },
   hint: { color: theme.colors.textMuted, fontSize: 12, textAlign: 'center', lineHeight: 18 },
   turnBox: { backgroundColor: 'rgba(255,59,0,0.08)', borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, padding: 10, marginTop: 8 },
