@@ -2,6 +2,7 @@ import { Attr } from './theme';
 import { formatNumberBR, formatSpeed } from './format';
 import { BossCard, BossState, KAELZOR_BOSS_CARDS, bossCard } from './bossData';
 import { Card, CT, MomentaryAction, PlayedCard } from './types';
+import { cardUses, ignoresCTAndModeDefense, ignoresCTDefense, normalizeTargetShape } from './normalize';
 
 export const bossDebug = false;
 
@@ -79,7 +80,7 @@ function mergeMaxSpeed(a: PlayerActionAnalysis['maxSpeed'], b: PlayerActionAnaly
 function ownAttackFromCards(cards: PlayedCard[]) {
   return cards.reduce((sum, played) => {
     const card = played.cardSnapshot;
-    const useAsAttack = card.actionType === 'attack' || card.countsAsAttack || card.battleUseType?.includes('ataque');
+    const useAsAttack = cardUses(card).ataque;
     return sum + numeric(card.momentaryAttrs?.Atk) + (useAsAttack ? numeric(card.boost?.Atk) : 0);
   }, 0);
 }
@@ -95,7 +96,8 @@ function structuredCloneCount(cards: PlayedCard[]) {
 function structuredTargetCount(cards: PlayedCard[], cloneCount: number) {
   return cards.reduce((max, played) => {
     const card = played.cardSnapshot;
-    const shapeTargets = card.targetShape && card.targetShape !== 'único' ? Math.max(2, numeric(card.targetCount), cloneCount) : 0;
+    const normalizedShape = normalizeTargetShape(card.targetShape);
+    const shapeTargets = normalizedShape && normalizedShape !== 'único' ? Math.max(2, numeric(card.targetCount), cloneCount) : 0;
     const summonTargets = card.actionType === 'diverse_summon' || card.cardType === 'invocação diversa' ? numeric(card.summonQuantity) : 0;
     return Math.max(max, numeric(card.actualTargets), numeric(card.targetCount), numeric(card.maxTargets), summonTargets, shapeTargets);
   }, Math.max(1, cloneCount));
@@ -103,7 +105,7 @@ function structuredTargetCount(cards: PlayedCard[], cloneCount: number) {
 
 function hasStructuredArea(cards: PlayedCard[]) {
   return cards.some(({ cardSnapshot: card }) => Boolean(
-    card.targetShape && card.targetShape !== 'único'
+    normalizeTargetShape(card.targetShape) && normalizeTargetShape(card.targetShape) !== 'único'
     || numeric(card.maxTargets) > 1
     || numeric(card.actualTargets) > 1
     || numeric(card.targetCount) > 1
@@ -133,8 +135,8 @@ export function analyzePlayerAction(
 
   const momentaryAtk = momentaryActions.reduce((sum, action) => sum + numeric(action.final.Atk), 0);
   const momentaryDef = momentaryActions.reduce((sum, action) => sum + numeric(action.final.Def), 0);
-  const directHpThreat = playedCards.some(item => item.cardSnapshot.directHpDamage || item.cardSnapshot.ignoresCTDefense || item.cardSnapshot.ignoresCommonDefense);
-  const hybridEvasion = playedCards.some(item => item.cardSnapshot.countsAsDodge || item.cardSnapshot.evasiveMovement || item.cardSnapshot.battleUseType?.includes('esquiva') || item.cardSnapshot.battleUseType?.includes('movimentação'));
+  const directHpThreat = playedCards.some(item => ignoresCTDefense(item.cardSnapshot) || ignoresCTAndModeDefense(item.cardSnapshot));
+  const hybridEvasion = playedCards.some(item => cardUses(item.cardSnapshot).movimentação || item.cardSnapshot.evasiveMovement);
   const activeMode = playedCards.some(item => item.cardSnapshot.actionType === 'mode' || item.cardSnapshot.cardType === 'modo/buff');
   const flying = playedCards.some(item => item.cardSnapshot.fieldPosition === 'voando') || keyword(text, ['voando', 'voo', 'aéreo', 'aereo']);
   const far = playedCards.some(item => item.cardSnapshot.fieldPosition === 'longe' || item.cardSnapshot.fieldPosition === 'outra dimensão') || keyword(text, ['longe', 'distante', 'outra dimensão', 'outra dimensao']);
@@ -344,18 +346,42 @@ function dynamicBossLegend(action: BossCard, analysis?: PlayerActionAnalysis) {
   const flying = !!analysis?.flying;
   const far = !!analysis?.far;
   const protectedByClones = !!analysis?.protectedByClones;
-  if (action.kind === 'movement') return `Uso ${action.name} para escapar da ofensiva e reposicionar meu corpo no campo.`;
-  if (action.kind === 'mode') return `Ativo ${action.name} para recuperar parte do meu poder selado.`;
-  if (action.kind === 'equipment') return `Ativo ${action.name} para reforçar minha defesa contra sua pressão.`;
-  if (action.kind === 'defense' || action.kind === 'mental' || action.kind === 'perception') return `Uso ${action.name} para responder à sua movimentação e manter o controle do campo.`;
-  if (action.id === 'corte-vazio-boss') return `Utilizo ${action.name} para rasgar sua defesa e atingir seu corpo diretamente.`;
-  if (action.id === 'lanca-fragmentada-boss') return `Utilizo ${action.name} para perfurar sua guarda e pressionar seu C.T.`;
-  if (action.id === 'chuva-estilhacos-rubros-boss' && clones) return `Utilizo ${action.name} para destruir essas cópias espalhadas pelo campo.`;
-  if (action.id === 'onda-abismo-partido-boss' && (manyTargets || protectedByClones)) return `Utilizo ${action.name} para varrer suas invocações e defesas do campo.`;
-  if (action.id === 'ruptura-vazio-menor-boss') return `Utilizo ${action.name} para consumir os alvos próximos em uma fenda dimensional.`;
-  if (flying) return `Utilizo ${action.name} mirando sua posição aérea antes que você se afaste.`;
-  if (far) return `Utilizo ${action.name} para alcançar sua distância e cortar sua rota de fuga.`;
-  return `Utilizo ${action.name} para pressionar seu C.T e forçar uma resposta imediata.`;
+  const turnSeed = (analysis?.declaredTargets || 0) + (analysis?.cloneCount || 0) + action.id.length;
+  const pick = (items: string[]) => items[turnSeed % items.length];
+  let speech: string;
+  if (action.kind === 'movement') speech = pick([
+    'Você mira uma sombra que já deixou de existir.',
+    'O espaço se rompe... e eu já não estou onde você ataca.',
+    'Tarde demais. O vazio se move antes da sua intenção.',
+  ]);
+  else if (action.kind === 'mode') speech = pick([
+    'Mais um selo se rompe... e o mundo se aproxima do fim.',
+    'O Fragmento desperta. A prisão começa a falhar.',
+    'Sinta apenas uma fração do poder que destruiu dimensões.',
+  ]);
+  else if (action.kind === 'defense' || action.kind === 'mental' || action.kind === 'perception') speech = pick([
+    'Sua ofensiva se desfaz diante do vazio.',
+    'Ataques como esse não alcançam um soberano selado.',
+    'O Abismo se fecha ao meu redor... e sua força desaparece.',
+  ]);
+  else if (clones) speech = pick([
+    'Cópias inúteis... o Abismo devora todas de uma vez.',
+    'Espalhar-se pelo campo só torna sua destruição mais bonita.',
+    'Essas réplicas serão apagadas antes mesmo de tocarem meu trono.',
+  ]);
+  else if (manyTargets || protectedByClones) speech = pick([
+    'Até suas criaturas serão arrastadas para o Abismo Vermelho.',
+    'Nenhuma invocação ficará entre mim e meu retorno.',
+    'Vou quebrar seus aliados antes de quebrar você.',
+  ]);
+  else if (flying) speech = 'Caia. O céu também pertence ao Abismo.';
+  else if (far) speech = 'Distância é apenas uma mentira que o vazio ainda não corrigiu.';
+  else speech = pick([
+    'Sinta o corte do vazio rasgando a sua existência.',
+    'Seu corpo ainda está preso ao mundo... vou corrigir isso.',
+    'Uma única lâmina basta para separar você da vida.',
+  ]);
+  return `Fala do Boss:\n"${speech}"\nCard: ${action.name}`;
 }
 
 export function resolveBossAttack(

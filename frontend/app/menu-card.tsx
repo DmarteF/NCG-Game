@@ -11,6 +11,7 @@ import { Card, CT } from '../src/types';
 import { theme, ATTRS, CT_ATTRS, CARD_RANKS, CT_RANKS, CardRank, Rank } from '../src/theme';
 import { Header } from './profile';
 import { ctDisplayName, formatNumberBR, formatSpeed } from '../src/format';
+import { battleUseLabel, ignoresCTAndModeDefense, ignoresCTDefense, targetShapeLabel } from '../src/normalize';
 
 type Tab = 'cards' | 'ct';
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -259,11 +260,14 @@ function describeCardEffects(card: Card): string {
   }
   if (card.maxTargets || card.targetCount || card.targetShape) {
     parts.push([
-      card.targetShape ? `Área: ${card.targetShape}` : '',
+      card.targetShape ? `Alvo: ${targetShapeLabel(card.targetShape)}` : '',
       card.maxTargets ? `Alvos máx.: ${formatNumberBR(card.maxTargets)}` : '',
       card.targetCount ? `Qtd/alvos: ${formatNumberBR(card.targetCount)}` : '',
     ].filter(Boolean).join(' • '));
   }
+  if (card.battleUseType || card.countsAsAttack || card.countsAsDefense || card.countsAsMovement) parts.push(`Uso: ${battleUseLabel(card)}`);
+  if (ignoresCTAndModeDefense(card)) parts.push('Ignora DEF C.T + Modo');
+  else if (ignoresCTDefense(card)) parts.push('Ignora DEF C.T');
   const momentary = ATTRS.filter(a => card.momentaryAttrs?.[a] != null).map(a => `${a}:${formatNumberBR(card.momentaryAttrs?.[a])}`).join(',');
   if (momentary) parts.push(`Ação: ${momentary}${card.useCTInfluence ? ' + atributo base' : ''}`);
   if (card.effect === 'none') return parts.join('  •  ');

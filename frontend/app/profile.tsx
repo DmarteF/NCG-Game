@@ -10,6 +10,7 @@ import { Storage } from '../src/storage';
 import { VILLAGES, theme } from '../src/theme';
 import { BattleHistoryItem } from '../src/types';
 import { copyOrShareHistory, exportHistoryPdf, exportHistoryText, exportSummaryCard, videoExportNotice } from '../src/historyExport';
+import { battleUseLabel, ignoresCTAndModeDefense, ignoresCTDefense, targetShapeLabel } from '../src/normalize';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -174,10 +175,10 @@ function ReplaySpectator({ item, index, setIndex }: { item: BattleHistoryItem; i
                 <Text style={styles.replayTitle}>{played.cardSnapshot.name} • Rank {played.cardSnapshot.rank || 'E'}</Text>
                 {played.cardSnapshot.caption ? <Text style={styles.bgHint}>{played.cardSnapshot.caption}</Text> : null}
                 <Text style={styles.bgHint}>{[
-                  played.cardSnapshot.battleUseType,
-                  played.cardSnapshot.targetShape,
+                  battleUseLabel(played.cardSnapshot),
+                  targetShapeLabel(played.cardSnapshot.targetShape),
                   played.cardSnapshot.actualTargets ? `${played.cardSnapshot.actualTargets} alvos reais` : '',
-                  played.cardSnapshot.directHpDamage ? 'dano direto no HP' : '',
+                  ignoresCTAndModeDefense(played.cardSnapshot) ? 'ignora DEF C.T + Modo' : ignoresCTDefense(played.cardSnapshot) ? 'ignora DEF C.T' : '',
                 ].filter(Boolean).join(' • ') || 'Card sem ajuste extra'}</Text>
               </View>
             ))}

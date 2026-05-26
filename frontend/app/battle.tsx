@@ -16,10 +16,11 @@ import { applyUpkeep, resolveCombat, subtractAttrs, visibleFinalAttrs } from '..
 import { BossState, bossCardToSnapshot, createBossCT, createKaelzorState } from '../src/bossData';
 import { PlayerActionAnalysis, resolveBossAttack, resolveBossDefense } from '../src/bossRules';
 import { calculationDetailsFor } from '../src/historyExport';
+import { SIMPLE_BATTLE_USES, SIMPLE_TARGET_SHAPES, battleUseLabel, cardUses, ignoresCTAndModeDefense, ignoresCTDefense, normalizeTargetShape, targetShapeLabel } from '../src/normalize';
 
 type Team = 'team1' | 'team2';
 type BattleAttrs = Record<Attr, number | 'ilimitado'>;
-type ActiveEffect = { id: string; team: Team; card: Card; remainingTurns?: number; quantityInitial?: number; quantityCurrent?: number };
+type ActiveEffect = { id: string; team: Team; ownerId: Team; card: Card; remainingTurns?: number; quantityInitial?: number; quantityCurrent?: number };
 type PendingBossAttack = {
   card: Card;
   damagePossible: number;
@@ -37,8 +38,8 @@ const BOSS_DIFFICULTY_MAX_RANK: Record<BossDifficulty, CardRank> = { facil: 'B',
 const rankAllowedForBossDifficulty = (difficulty: BossDifficulty, rank: Rank | CardRank) => CARD_RANK_ORDER[rank as CardRank] <= CARD_RANK_ORDER[BOSS_DIFFICULTY_MAX_RANK[difficulty]];
 const bossDifficultyWarning = (difficulty: BossDifficulty) => `Esta dificuldade permite apenas C.T até Rank ${BOSS_DIFFICULTY_MAX_RANK[difficulty]}.`;
 const numericAttr = (value: number | 'ilimitado' | undefined) => typeof value === 'number' && Number.isFinite(value) ? value : 0;
-const PLAY_USE_TYPES: BattleUseType[] = ['ataque', 'defesa', 'movimentação', 'esquiva', 'aproximação', 'recuo', 'reposicionamento', 'ataque + movimentação', 'ataque + esquiva', 'defesa + movimentação'];
-const TARGET_SHAPES: TargetShape[] = ['único', 'área', 'linha', 'cone', 'grupo', 'todos ao redor'];
+const PLAY_USE_TYPES: BattleUseType[] = SIMPLE_BATTLE_USES;
+const TARGET_SHAPES: TargetShape[] = SIMPLE_TARGET_SHAPES;
 const COMBAT_TARGETS: CombatTargetKind[] = ['C.T principal', 'Boss', 'invocação', 'clone', 'arma', 'barreira', 'modo/buff', 'grupo', 'outro'];
 const FIELD_POSITIONS: FieldPosition[] = ['chão', 'voando', 'perto', 'longe', 'escondido/invisível', 'rastreado', 'outra dimensão', 'protegido', 'atrás de clones'];
 
@@ -119,7 +120,6 @@ export default function Battle() {
 
   const t2Label = isBoss ? 'Boss' : 'Time 2';
   const bossCT = createBossCT(bossState);
-  const activeCards = activeEffects.filter(effect => effect.team === currentTeam);
   const currentActiveCT = isBoss && currentTeam === 'team2'
     ? bossCT
     : (currentTeam === 'team1' ? initCT1 : initCT2)
@@ -327,8 +327,8 @@ export default function Battle() {
     if (!pendingBossAttack || pendingBossAttack.intendedTarget !== 'team1') return null;
     const cardsUsed = played.map(item => item.cardSnapshot);
     const lowerText = `${observation} ${cardsUsed.map(card => `${card.name} ${card.caption}`).join(' ')}`.toLowerCase();
-    const hasDefenseCard = cardsUsed.some(card => card.actionType === 'defense');
-    const movementCards = cardsUsed.filter(card => card.actionType === 'movement' || card.cardType === 'movimentação');
+    const hasDefenseCard = cardsUsed.some(card => cardUses(card).defesa);
+    const movementCards = cardsUsed.filter(card => cardUses(card).movimentação);
     const hasDodgeText = ['defesa', 'defendo', 'bloqueio', 'barreira', 'escudo', 'esquiva', 'desvio', 'substituição', 'substituicao', 'clone', 'invocação', 'invocacao', 'marionete', 'edo'].some(word => lowerText.includes(word));
     const hasCloneOrSummon = cardsUsed.some(card => isDiverseSummonCard(card) || card.cardType === 'invocação' || card.cardType === 'marionete' || card.cardType === 'edo tensei' || card.entityType) || !!activeEntity;
     const defBoost = cardsUsed.reduce((sum, card) => sum + Number(card.boost?.Def || 0) + Number(card.momentaryAttrs?.Def || 0), 0);
@@ -487,6 +487,7 @@ export default function Battle() {
         next.push({
           id: `${card.id}:${Date.now()}:${index}`,
           team: currentTeam,
+          ownerId: currentTeam,
           card: quantity ? { ...card, summonQuantity: quantity } : card,
           remainingTurns: card.durationType === 'turnos' ? card.durationTurns || 0 : undefined,
           quantityInitial: quantity,
@@ -563,14 +564,6 @@ export default function Battle() {
     setTimeLeft(turnSeconds);
   };
 
-  const disableActive = (effectId: string) => {
-    const effect = activeEffects.find(e => e.id === effectId);
-    if (!effect) return;
-    setBattleAttrs((attrs) => ({ ...attrs, [effect.team]: subtractAttrs(attrs[effect.team], effect.card.boost) }));
-    setActiveEffects((effects) => effects.filter(e => e.id !== effectId));
-    setMessages((m) => [...m, { id: uid(), turn, team: 'system', text: `${effect.card.name} foi desativado.`, timestamp: Date.now() }]);
-  };
-
   const declareDeath = () => {
     const dead = currentTeam === 'team1' ? 'Time 1' : t2Label;
     const winner = currentTeam === 'team1' ? t2Label : 'Time 1';
@@ -639,9 +632,6 @@ export default function Battle() {
       </View>
 
       <FlatList
-        ListHeaderComponent={activeCards.length > 0 ? (
-          <ActiveCardsBar effects={activeCards} onDisable={disableActive} />
-        ) : null}
         data={messages}
         keyExtractor={(i) => i.id}
         contentContainerStyle={{ paddingVertical: 12, gap: 8 }}
@@ -683,7 +673,7 @@ export default function Battle() {
         onClose={() => setPickerVisible(false)}
         cards={cards}
         activeCT={currentActiveCT}
-        activeEffects={activeEffects.filter(effect => effect.team === currentTeam)}
+        activeEffects={activeEffects.filter(effect => effect.ownerId === currentTeam)}
         bossDifficulty={isBoss ? difficulty : undefined}
         onImagePress={setZoomImage}
         onConfirm={(played, ctSnap, obs, finalAttrs, keptActiveEffectIds, activeEntity, finalEntityAttrs, momentaryActions) => {
@@ -693,30 +683,6 @@ export default function Battle() {
       />
       <ZoomableImageModal uri={zoomImage} onClose={() => setZoomImage(null)} />
     </Screen>
-  );
-}
-
-function ActiveCardsBar({ effects, onDisable }: { effects: ActiveEffect[]; onDisable: (id: string) => void }) {
-  return (
-    <View style={styles.activeBar}>
-      <Text style={styles.label}>Ativos da luta</Text>
-      {effects.map(effect => {
-        const card = effect.card;
-        const upkeep = ATTRS.filter(a => card.upkeepCost?.[a] != null).map(a => `${a}:${formatNumberBR(card.upkeepCost?.[a])}`).join(' • ');
-        const boost = ATTRS.filter(a => card.boost?.[a] != null).map(a => `${a}:${formatNumberBR(card.boost?.[a])}`).join(' • ');
-        const quantity = effect.quantityCurrent ?? initialDiverseQuantity(card);
-        const quantityInitial = effect.quantityInitial ?? quantity;
-        return (
-          <View key={effect.id} style={styles.activeItem}>
-            <Text style={styles.cardName}>{card.name} • {card.cardType || 'técnica'}</Text>
-            <Text style={styles.obs}>Duração: {card.durationType === 'turnos' ? `por turnos (${effect.remainingTurns || 0})` : 'persistente'}{upkeep ? ` • Custo/turno: ${upkeep}` : ''}</Text>
-            {quantity ? <Text style={styles.obs}>Quantidade: {formatNumberBR(quantity)}{quantityInitial ? `/${formatNumberBR(quantityInitial)}` : ''}</Text> : null}
-            {boost ? <Text style={styles.obs}>Bônus ativo: {boost}</Text> : null}
-            <Pressable onPress={() => onDisable(effect.id)} style={styles.activeDisable}><Text style={styles.activeDisableText}>Desativar</Text></Pressable>
-          </View>
-        );
-      })}
-    </View>
   );
 }
 
@@ -768,11 +734,14 @@ function ChatBubble({ msg, t2Label, onImagePress }: { msg: ChatMsg; t2Label: str
     );
   }
   const isT1 = msg.team === 'team1';
+  const bossSpeech = !isT1 && msg.text?.startsWith('Fala do Boss:\n') ? msg.text.split('\n').slice(0, 2).join('\n') : '';
+  const remainingText = bossSpeech ? msg.text?.split('\n').slice(2).join('\n') : msg.text;
   return (
     <View style={[styles.bubbleRow, { justifyContent: isT1 ? 'flex-end' : 'flex-start' }]}>
       <View style={[styles.bubble, isT1 ? styles.bubbleT1 : styles.bubbleT2]}>
         <Text style={styles.bubbleHeader}>Turno {msg.turn} • {isT1 ? 'Time 1' : t2Label}</Text>
-        {msg.text ? <Text style={styles.chatText}>{msg.text}</Text> : null}
+        {bossSpeech ? <View style={styles.bossSpeechBox}><Text style={styles.bossSpeechTitle}>Fala do Boss</Text><Text style={styles.bossSpeechText}>{bossSpeech.replace('Fala do Boss:\n', '')}</Text></View> : null}
+        {remainingText ? <Text style={styles.chatText}>{remainingText}</Text> : null}
 
         {msg.playedCards?.map((p, idx) => (
           <View key={idx} style={styles.playedCard}>
@@ -848,7 +817,7 @@ function renderEffectLines(c: Card, action?: MomentaryAction) {
     if (c.movementType) lines.push(`Movimento: ${c.movementType}`);
     if (c.movementRange) lines.push(`Alcance: ${c.movementRange}`);
   }
-  if (c.battleUseType) lines.push(`Tipo usado nesta jogada: ${c.battleUseType}`);
+  if (c.battleUseType || c.countsAsAttack || c.countsAsDefense || c.countsAsMovement) lines.push(`Tipo usado nesta jogada: ${battleUseLabel(c)}`);
   if (c.combatTargetKind || c.effectTargetLabel) lines.push(`Alvo do efeito: ${[c.combatTargetKind, c.effectTargetLabel].filter(Boolean).join(' • ')}`);
   if (c.costTargetLabel) lines.push(`Alvo do custo: ${c.costTargetLabel}`);
   if (c.fieldPosition) lines.push(`Estado de campo: ${c.fieldPosition}`);
@@ -874,15 +843,12 @@ function renderEffectLines(c: Card, action?: MomentaryAction) {
     if (c.summonAtkIndividual) lines.push(`Atk individual: ${formatNumberBR(c.summonAtkIndividual)}`);
     if (c.summonDefIndividual) lines.push(`Def individual: ${formatNumberBR(c.summonDefIndividual)}`);
   }
-  if (c.targetShape) lines.push(`Área/alvo: ${c.targetShape}`);
+  if (c.targetShape) lines.push(`Alvo: ${targetShapeLabel(c.targetShape)}`);
   if (c.targetCount) lines.push(`Alvos/quantidade: ${formatNumberBR(c.targetCount)}`);
   if (c.actualTargets) lines.push(`Alvos reais nesta jogada: ${formatNumberBR(c.actualTargets)}`);
   if (c.maxTargets) lines.push(`Máx. alvos atingidos: ${formatNumberBR(c.maxTargets)}`);
   const defenseFlags = [
-    c.ignoresCTDefense ? 'ignora DEF do C.T' : '',
-    c.ignoresCommonDefense ? 'ignora defesa comum' : '',
-    c.directHpDamage ? 'vai direto no HP' : '',
-    c.piercing ? 'perfuração' : '',
+    ignoresCTAndModeDefense(c) ? 'ignora DEF C.T + Modo' : ignoresCTDefense(c) ? 'ignora DEF C.T' : '',
     c.compatibleDefenseOnly ? 'só defesa compatível responde' : '',
     c.stoppedBySpecificDefense ? 'pode ser parado por arma/barreira específica' : '',
   ].filter(Boolean).join(' • ');
@@ -891,7 +857,6 @@ function renderEffectLines(c: Card, action?: MomentaryAction) {
     c.countsAsAttack ? 'ataque' : '',
     c.countsAsDefense ? 'defesa' : '',
     c.countsAsMovement ? 'movimentação' : '',
-    c.countsAsDodge ? 'esquiva' : '',
     c.offensiveMovement ? 'movimentação ofensiva' : '',
     c.evasiveMovement ? 'movimentação evasiva' : '',
   ].filter(Boolean).join(' • ');
@@ -1291,7 +1256,7 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
                       <View key={`${card.id}-${index}`} style={styles.checkCardItem}>
                         <Text style={styles.cardName}>{index + 1}. {card.name}</Text>
                         <Text style={styles.obs}>
-                          {[card.battleUseType, card.targetShape, card.actualTargets ? `${formatNumberBR(card.actualTargets)} alvos reais` : '', card.directHpDamage ? 'dano direto no HP' : '', card.fieldPosition].filter(Boolean).join(' • ') || 'Sem ajuste especial nesta jogada'}
+                          {[battleUseLabel(card), targetShapeLabel(card.targetShape), card.actualTargets ? `${formatNumberBR(card.actualTargets)} alvos reais` : '', ignoresCTAndModeDefense(card) ? 'ignora DEF C.T + Modo' : ignoresCTDefense(card) ? 'ignora DEF C.T' : '', card.fieldPosition].filter(Boolean).join(' • ') || 'Sem ajuste especial nesta jogada'}
                         </Text>
                         <View style={styles.checkCardActions}>
                           <Button title="Editar" small variant="secondary" onPress={() => editSelectedCard(index)} testID={`check-edit-${card.id}`} />
@@ -1335,12 +1300,26 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
 }
 
 function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<Card>) => void }) {
-  const showMomentary = card.actionType === 'attack' || card.actionType === 'defense' || card.actionType === 'equipment';
+  const uses = cardUses(card);
+  const showMomentary = uses.ataque || uses.defesa || card.actionType === 'equipment';
   const setNumber = (key: keyof Card, text: string) => {
     const value = Number(text.replace(/[^\d.-]/g, ''));
     onChange({ [key]: Number.isFinite(value) ? value : undefined } as Partial<Card>);
   };
   const toggle = (key: keyof Card) => onChange({ [key]: !card[key] } as Partial<Card>);
+  const toggleUse = (type: BattleUseType) => {
+    const key = type === 'ataque' ? 'countsAsAttack' : type === 'defesa' ? 'countsAsDefense' : type === 'movimentação' ? 'countsAsMovement' : undefined;
+    if (!key) {
+      onChange({ battleUseType: 'suporte' });
+      return;
+    }
+    const nextValue = !card[key];
+    const patch: Partial<Card> = { [key]: nextValue } as Partial<Card>;
+    if (type === 'ataque' && nextValue) patch.battleUseType = 'ataque';
+    if (type === 'defesa' && nextValue) patch.battleUseType = 'defesa';
+    if (type === 'movimentação' && nextValue) patch.battleUseType = 'movimentação';
+    onChange(patch);
+  };
   return (
     <View>
       <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 10 }}>
@@ -1351,18 +1330,12 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
       <Text style={styles.label}>Ajuste da jogada</Text>
       <View style={styles.chipsRow}>
         {PLAY_USE_TYPES.map(type => (
-          <Chip key={type} label={type} active={card.battleUseType === type} onPress={() => onChange({
-            battleUseType: type,
-            countsAsAttack: type.includes('ataque') || card.countsAsAttack,
-            countsAsDefense: type.includes('defesa') || card.countsAsDefense,
-            countsAsMovement: ['movimentação', 'aproximação', 'recuo', 'reposicionamento'].some(word => type.includes(word)) || card.countsAsMovement,
-            countsAsDodge: type.includes('esquiva') || card.countsAsDodge,
-          })} testID={`play-use-${card.id}-${type}`} />
+          <Chip key={type} label={type[0].toUpperCase() + type.slice(1)} active={!!uses[type as keyof typeof uses]} onPress={() => toggleUse(type)} testID={`play-use-${card.id}-${type}`} />
         ))}
       </View>
       <Text style={styles.label}>Alvo dinâmico</Text>
       <View style={styles.chipsRow}>
-        {TARGET_SHAPES.map(shape => <Chip key={shape} label={shape} active={card.targetShape === shape} onPress={() => onChange({ targetShape: shape })} testID={`play-shape-${card.id}-${shape}`} />)}
+        {TARGET_SHAPES.map(shape => <Chip key={shape} label={shape === 'área com quantidade' ? 'Área com quantidade' : shape === 'área total' ? 'Área total' : 'Único'} active={normalizeTargetShape(card.targetShape) === shape} onPress={() => onChange({ targetShape: shape })} testID={`play-shape-${card.id}-${shape}`} />)}
       </View>
       <View style={styles.row2}>
         <Input label="Qtd declarada" value={card.targetCount != null ? String(card.targetCount) : ''} onChangeText={(text) => setNumber('targetCount', text)} keyboardType="numeric" />
@@ -1381,9 +1354,7 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
       <Text style={styles.label}>Dano e defesa</Text>
       <View style={styles.chipsRow}>
         <Chip label="Ignora DEF do C.T" active={!!card.ignoresCTDefense} onPress={() => toggle('ignoresCTDefense')} testID={`play-ignore-ct-def-${card.id}`} />
-        <Chip label="Ignora defesa comum" active={!!card.ignoresCommonDefense} onPress={() => toggle('ignoresCommonDefense')} testID={`play-ignore-common-def-${card.id}`} />
-        <Chip label="Direto no HP" active={!!card.directHpDamage} onPress={() => toggle('directHpDamage')} testID={`play-direct-hp-${card.id}`} />
-        <Chip label="Perfuração" active={!!card.piercing} onPress={() => toggle('piercing')} testID={`play-piercing-${card.id}`} />
+        <Chip label="Ignora DEF C.T + Modo" active={!!card.ignoresCommonDefense} onPress={() => toggle('ignoresCommonDefense')} testID={`play-ignore-common-def-${card.id}`} />
         <Chip label="Só defesa compatível" active={!!card.compatibleDefenseOnly} onPress={() => toggle('compatibleDefenseOnly')} testID={`play-compatible-only-${card.id}`} />
         <Chip label="Barreira/arma específica" active={!!card.stoppedBySpecificDefense} onPress={() => toggle('stoppedBySpecificDefense')} testID={`play-specific-stop-${card.id}`} />
       </View>
@@ -1393,7 +1364,6 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
         <Chip label="Ataque" active={!!card.countsAsAttack} onPress={() => toggle('countsAsAttack')} />
         <Chip label="Defesa" active={!!card.countsAsDefense} onPress={() => toggle('countsAsDefense')} />
         <Chip label="Movimentação" active={!!card.countsAsMovement} onPress={() => toggle('countsAsMovement')} />
-        <Chip label="Esquiva" active={!!card.countsAsDodge} onPress={() => toggle('countsAsDodge')} />
         <Chip label="Mov. ofensiva" active={!!card.offensiveMovement} onPress={() => toggle('offensiveMovement')} />
         <Chip label="Mov. evasiva" active={!!card.evasiveMovement} onPress={() => toggle('evasiveMovement')} />
       </View>
@@ -1405,11 +1375,11 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
         <>
           <Text style={styles.label}>Valor momentâneo</Text>
           <AttrEditor
-            label={card.actionType === 'defense' ? 'Defesa momentânea' : card.actionType === 'equipment' ? 'Atk/Def da arma' : 'Ataque momentâneo'}
+            label={uses.defesa && !uses.ataque ? 'Defesa momentânea' : card.actionType === 'equipment' ? 'Atk/Def da arma' : 'Ataque momentâneo'}
             values={card.momentaryAttrs || {}}
             setValues={(v) => onChange({ momentaryAttrs: v })}
             keyPrefix={`play-momentary-${card.id}`}
-            allowedAttrs={card.actionType === 'attack' ? ['Atk'] : card.actionType === 'defense' ? ['Def'] : ['Atk', 'Def']}
+            allowedAttrs={uses.ataque && uses.defesa || card.actionType === 'equipment' ? ['Atk', 'Def'] : uses.defesa ? ['Def'] : ['Atk']}
           />
           <Text style={styles.label}>Usar atributo do O C.T/alvo no cálculo?</Text>
           <View style={styles.chipsRow}>
@@ -1469,6 +1439,9 @@ const styles = StyleSheet.create({
   bubbleT2: { backgroundColor: 'rgba(255,255,255,0.05)', borderColor: 'rgba(255,255,255,0.1)', borderTopLeftRadius: 4 },
   bubbleHeader: { color: theme.colors.neon, fontSize: 10, fontWeight: '800', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 },
   chatText: { color: '#fff', fontSize: 13, lineHeight: 18 },
+  bossSpeechBox: { backgroundColor: 'rgba(255,59,0,0.12)', borderLeftWidth: 3, borderLeftColor: theme.colors.primary, borderRadius: 8, padding: 8, marginBottom: 6 },
+  bossSpeechTitle: { color: theme.colors.neon, fontSize: 10, fontWeight: '900', textTransform: 'uppercase', marginBottom: 3 },
+  bossSpeechText: { color: '#fff', fontSize: 13, fontStyle: 'italic', lineHeight: 18 },
   playedCard: { backgroundColor: 'rgba(0,0,0,0.25)', padding: 8, borderRadius: 10, marginVertical: 4, gap: 4 },
   cardThumb: { width: 36, height: 36, borderRadius: 8, backgroundColor: theme.colors.bg },
   cardThumbFb: { borderWidth: 1, borderColor: theme.colors.border },

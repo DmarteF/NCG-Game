@@ -4,6 +4,7 @@ import * as Sharing from 'expo-sharing';
 import { ATTRS } from './theme';
 import { BattleHistoryItem, ChatMsg } from './types';
 import { formatNumberBR, formatSpeed } from './format';
+import { battleUseLabel, ignoresCTAndModeDefense, ignoresCTDefense, targetShapeLabel } from './normalize';
 
 function lineForAttrs(prefix: string, attrs?: Record<string, number | 'ilimitado'>) {
   if (!attrs) return '';
@@ -30,15 +31,12 @@ export function calculationDetailsFor(msg: Pick<ChatMsg, 'playedCards' | 'moment
     }
     if (cost) lines.push(`Custo aplicado: ${cost}`);
     if (boost) lines.push(`Bônus de modo/arma/invocação: ${boost}`);
-    if (card.battleUseType) lines.push(`Tipo usado nesta jogada: ${card.battleUseType}`);
+    if (card.battleUseType || card.countsAsAttack || card.countsAsDefense || card.countsAsMovement) lines.push(`Tipo usado nesta jogada: ${battleUseLabel(card)}`);
     if (card.targetShape || card.actualTargets || card.maxTargets) {
-      lines.push(`Alvo dinâmico: ${[card.targetShape, card.actualTargets ? `${formatNumberBR(card.actualTargets)} alvos reais` : '', card.maxTargets ? `máx. ${formatNumberBR(card.maxTargets)}` : ''].filter(Boolean).join(', ')}`);
+      lines.push(`Alvo dinâmico: ${[targetShapeLabel(card.targetShape), card.actualTargets ? `${formatNumberBR(card.actualTargets)} alvos reais` : '', card.maxTargets ? `máx. ${formatNumberBR(card.maxTargets)}` : ''].filter(Boolean).join(', ')}`);
     }
     const defenseFlags = [
-      card.ignoresCTDefense ? 'ignora DEF do C.T' : '',
-      card.ignoresCommonDefense ? 'ignora defesa comum' : '',
-      card.directHpDamage ? 'aplica dano direto ao HP' : '',
-      card.piercing ? 'perfuração' : '',
+      ignoresCTAndModeDefense(card) ? 'DEF do C.T e defesa de modo ignoradas' : ignoresCTDefense(card) ? 'DEF do C.T ignorada' : '',
       card.compatibleDefenseOnly ? 'exige defesa compatível' : '',
     ].filter(Boolean).join(', ');
     if (defenseFlags) lines.push(`Regra de defesa: ${defenseFlags}.`);
@@ -86,9 +84,10 @@ export function exportHistoryText(item: BattleHistoryItem) {
       parts.push(`Card usado: ${card.name} | Rank ${card.rank || 'E'} | ${formatSpeed(card.speed) || 'Sem Speed'}`);
       if (card.caption) parts.push(`Legenda: ${card.caption}`);
       if (cost) parts.push(`Custo: ${cost}`);
-      if (card.battleUseType) parts.push(`Tipo usado nesta jogada: ${card.battleUseType}`);
-      if (card.targetShape || card.actualTargets || card.maxTargets) parts.push(`Alvos: ${[card.targetShape, card.actualTargets ? `${formatNumberBR(card.actualTargets)} reais` : '', card.maxTargets ? `máx ${formatNumberBR(card.maxTargets)}` : ''].filter(Boolean).join(' | ')}`);
-      if (card.directHpDamage || card.ignoresCTDefense || card.ignoresCommonDefense) parts.push('Este ataque ignora DEF comum e aplica dano direto ao HP quando não houver defesa compatível.');
+      if (card.battleUseType || card.countsAsAttack || card.countsAsDefense || card.countsAsMovement) parts.push(`Tipo usado nesta jogada: ${battleUseLabel(card)}`);
+      if (card.targetShape || card.actualTargets || card.maxTargets) parts.push(`Alvos: ${[targetShapeLabel(card.targetShape), card.actualTargets ? `${formatNumberBR(card.actualTargets)} reais` : '', card.maxTargets ? `máx ${formatNumberBR(card.maxTargets)}` : ''].filter(Boolean).join(' | ')}`);
+      if (ignoresCTAndModeDefense(card)) parts.push('DEF do C.T e defesa de modo ignoradas.');
+      else if (ignoresCTDefense(card)) parts.push('DEF do C.T ignorada.');
       if (card.temporaryNote) parts.push(`Observação temporária: ${card.temporaryNote}`);
     }
     const calc = msg.calculationDetails || calculationDetailsFor(msg);
@@ -141,7 +140,7 @@ function historyHtml(item: BattleHistoryItem) {
         <div>
           <h3>${escapeHtml(card.name)} <span>Rank ${escapeHtml(card.rank || 'E')}</span></h3>
           ${card.caption ? `<p>${escapeHtml(card.caption)}</p>` : ''}
-          <small>${escapeHtml([card.battleUseType, card.targetShape, card.actualTargets ? `${card.actualTargets} alvos` : '', card.directHpDamage ? 'dano direto no HP' : ''].filter(Boolean).join(' • '))}</small>
+          <small>${escapeHtml([battleUseLabel(card), targetShapeLabel(card.targetShape), card.actualTargets ? `${card.actualTargets} alvos` : '', ignoresCTAndModeDefense(card) ? 'ignora DEF C.T + Modo' : ignoresCTDefense(card) ? 'ignora DEF C.T' : ''].filter(Boolean).join(' • '))}</small>
         </div>
       </div>
     `).join('');

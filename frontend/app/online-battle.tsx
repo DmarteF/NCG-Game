@@ -8,7 +8,7 @@ import Input from '../src/components/Input';
 import Chip from '../src/components/Chip';
 import ZoomableImageModal from '../src/components/ZoomableImageModal';
 import { Storage, uid } from '../src/storage';
-import { BattleEntity, BossDifficulty, Card, CT, MatchType, MomentaryAction, PlayedCard } from '../src/types';
+import { BattleEntity, BattleUseType, BossDifficulty, Card, CT, MatchType, MomentaryAction, PlayedCard, TargetShape } from '../src/types';
 import { ATTRS, CT_ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CardRank, Rank } from '../src/theme';
 import { AttrEditor, UnlimitedEditor } from './card-edit';
 import { RoomClient, WSEvent } from '../src/online';
@@ -16,6 +16,10 @@ import { ctDisplayName, formatNumberBR, formatSpeed } from '../src/format';
 import { withRemoteImageCard, withRemoteImageCT, withRemoteImageEntity } from '../src/remoteImages';
 import { resolveCombat, visibleFinalAttrs } from '../src/combat';
 import { calculationDetailsFor } from '../src/historyExport';
+import { SIMPLE_BATTLE_USES, SIMPLE_TARGET_SHAPES, battleUseLabel, cardUses, ignoresCTAndModeDefense, ignoresCTDefense, normalizeTargetShape, targetShapeLabel } from '../src/normalize';
+
+const PLAY_USE_TYPES: BattleUseType[] = SIMPLE_BATTLE_USES;
+const TARGET_SHAPES: TargetShape[] = SIMPLE_TARGET_SHAPES;
 
 type Side = 'me' | 'opp';
 type PlayerInfo = { name: string; village: string; image?: string };
@@ -580,9 +584,13 @@ function renderEffectLines(c: Card, action?: MomentaryAction) {
     if (c.summonAtkIndividual) lines.push(`Atk individual: ${formatNumberBR(c.summonAtkIndividual)}`);
     if (c.summonDefIndividual) lines.push(`Def individual: ${formatNumberBR(c.summonDefIndividual)}`);
   }
-  if (c.targetShape) lines.push(`Área/alvo: ${c.targetShape}`);
+  if (c.battleUseType || c.countsAsAttack || c.countsAsDefense || c.countsAsMovement) lines.push(`Tipo usado nesta jogada: ${battleUseLabel(c)}`);
+  if (c.targetShape) lines.push(`Alvo: ${targetShapeLabel(c.targetShape)}`);
   if (c.targetCount) lines.push(`Alvos/quantidade: ${formatNumberBR(c.targetCount)}`);
+  if (c.actualTargets) lines.push(`Alvos reais nesta jogada: ${formatNumberBR(c.actualTargets)}`);
   if (c.maxTargets) lines.push(`Máx. alvos atingidos: ${formatNumberBR(c.maxTargets)}`);
+  if (ignoresCTAndModeDefense(c)) lines.push('Defesa: ignora DEF C.T + Modo');
+  else if (ignoresCTDefense(c)) lines.push('Defesa: ignora DEF C.T');
   if (action) {
     for (const attr of ATTRS.filter(a => action.final[a] != null)) {
       lines.push(`${attr} final: ${formatNumberBR(action.final[attr])}`);
@@ -650,6 +658,7 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
   const [step, setStep] = useState<'cards' | 'card-edit' | 'target' | 'checklist'>('cards');
   const [selectedCards, setSelectedCards] = useState<Card[]>([]);
   const [editIdx, setEditIdx] = useState(0);
+  const [editReturnToChecklist, setEditReturnToChecklist] = useState(false);
   const [activeEntityId, setActiveEntityId] = useState<string | null>(null);
   const [entityCostCardIds, setEntityCostCardIds] = useState<string[]>([]);
   const [entityBoostCardIds, setEntityBoostCardIds] = useState<string[]>([]);
@@ -661,7 +670,7 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
 
   useEffect(() => {
     if (visible) {
-      setStep('cards'); setSelectedCards([]); setEditIdx(0); setActiveEntityId(null); setEntityCostCardIds([]); setEntityBoostCardIds([]); setObservation('');
+      setStep('cards'); setSelectedCards([]); setEditIdx(0); setEditReturnToChecklist(false); setActiveEntityId(null); setEntityCostCardIds([]); setEntityBoostCardIds([]); setObservation('');
       setCardQuery(''); setCardRanks([]);
       Storage.getLastPlayedCardIds().then(setLastCardIds);
       Storage.getLastCardCaptions().then(setLastCaptions);
@@ -674,9 +683,31 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
       : [...arr, { ...c, caption: lastCaptions[c.id] ?? c.caption, cost: { ...c.cost }, boost: { ...c.boost }, unlimited: { ...c.unlimited }, entityAttrs: c.entityAttrs ? { ...c.entityAttrs } : undefined, entityUnlimited: c.entityUnlimited ? { ...c.entityUnlimited } : undefined }]);
   };
   const updateCard = (patch: Partial<Card>) => setSelectedCards(arr => arr.map((c, i) => i === editIdx ? { ...c, ...patch } : c));
+  const removeSelectedCard = (index: number) => {
+    const removed = selectedCards[index];
+    setSelectedCards(arr => arr.filter((_, i) => i !== index));
+    if (removed) {
+      setEntityCostCardIds(ids => ids.filter(id => id !== removed.id));
+      setEntityBoostCardIds(ids => ids.filter(id => id !== removed.id));
+    }
+    setEditIdx(0);
+  };
+  const editSelectedCard = (index: number) => {
+    setEditIdx(index);
+    setEditReturnToChecklist(true);
+    setStep('card-edit');
+  };
 
   const goEditCards = () => { if (selectedCards.length === 0) setStep('target'); else { setEditIdx(0); setStep('card-edit'); } };
-  const finishCardEdits = () => { if (editIdx + 1 < selectedCards.length) setEditIdx(editIdx + 1); else setStep('target'); };
+  const finishCardEdits = () => {
+    if (editReturnToChecklist) {
+      setEditReturnToChecklist(false);
+      setStep('checklist');
+      return;
+    }
+    if (editIdx + 1 < selectedCards.length) setEditIdx(editIdx + 1);
+    else setStep('target');
+  };
   const toggleCardRank = (rank: CardRank) => setCardRanks((ranks) => ranks.includes(rank) ? ranks.filter(r => r !== rank) : [...ranks, rank]);
   const visibleCards = [...cards].sort((a, b) => {
     const ai = lastCardIds.indexOf(a.id);
@@ -839,7 +870,19 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
             {step === 'checklist' && activeCT && (
               <View style={styles.checklistBox}>
                 <Text style={styles.label}>Resumo antes de enviar</Text>
-                <Text style={styles.attrLine}>Cards selecionados: {selectedCards.map(card => card.name).join(', ') || 'nenhum'}</Text>
+                <View style={{ gap: 8 }}>
+                  {selectedCards.length === 0 ? <Text style={styles.attrLine}>Cards selecionados: nenhum</Text> : null}
+                  {selectedCards.map((card, index) => (
+                    <View key={`${card.id}-${index}`} style={styles.checkCardItem}>
+                      <Text style={styles.cardName}>{index + 1}. {card.name}</Text>
+                      <Text style={styles.obs}>{[battleUseLabel(card), targetShapeLabel(card.targetShape), card.actualTargets ? `${formatNumberBR(card.actualTargets)} alvos reais` : '', ignoresCTAndModeDefense(card) ? 'ignora DEF C.T + Modo' : ignoresCTDefense(card) ? 'ignora DEF C.T' : ''].filter(Boolean).join(' • ') || 'Sem ajuste especial nesta jogada'}</Text>
+                      <View style={styles.checkCardActions}>
+                        <Button title="Editar" small variant="secondary" onPress={() => editSelectedCard(index)} testID={`online-check-edit-${card.id}`} />
+                        <Button title="Remover" small variant="ghost" onPress={() => removeSelectedCard(index)} testID={`online-check-remove-${card.id}`} />
+                      </View>
+                    </View>
+                  ))}
+                </View>
                 <Text style={styles.attrLine}>Custo total: {totalCost || 'sem custo'}</Text>
                 <Text style={styles.attrLine}>Alvo do custo: {activeEntity ? activeEntity.name : 'O C.T principal'}</Text>
                 <Text style={styles.attrLine}>Modos ativos: {selectedCards.filter(card => card.actionType === 'mode' || card.cardType === 'modo/buff').map(card => card.name).join(', ') || 'nenhum'}</Text>
@@ -853,11 +896,12 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
 
           <View style={styles.modalFooter}>
             {step === 'cards' && <Button title="Avançar" onPress={goEditCards} testID="online-play-next-cards" />}
-            {step === 'card-edit' && <Button title={editIdx + 1 < selectedCards.length ? 'Próximo card' : 'Escolher alvo'} onPress={finishCardEdits} testID="online-play-next-card-edit" />}
+            {step === 'card-edit' && <Button title={editReturnToChecklist ? 'Voltar ao checklist' : editIdx + 1 < selectedCards.length ? 'Próximo card' : 'Escolher alvo'} onPress={finishCardEdits} testID="online-play-next-card-edit" />}
             {step === 'target' && <Button title="Revisar jogada" onPress={() => setStep('checklist')} testID="online-play-review-btn" />}
             {step === 'checklist' && (
               <View style={{ flexDirection: 'row', gap: 8 }}>
-                <Button title="Voltar e editar" variant="ghost" onPress={() => setStep('target')} style={{ flex: 1 }} testID="online-play-edit-btn" />
+                <Button title="Seleção" variant="ghost" onPress={() => setStep('cards')} style={{ flex: 1 }} testID="online-play-selection-btn" />
+                <Button title="Alvos" variant="secondary" onPress={() => setStep('target')} style={{ flex: 1 }} testID="online-play-edit-btn" />
                 <Button title="Confirmar jogada" onPress={confirmPlay} style={{ flex: 1 }} testID="online-play-confirm-btn" />
               </View>
             )}
@@ -869,7 +913,19 @@ function PlayModal({ visible, onClose, cards, activeCT, onImagePress, onConfirm 
 }
 
 function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<Card>) => void }) {
-  const showMomentary = card.actionType === 'attack' || card.actionType === 'defense' || card.actionType === 'equipment';
+  const uses = cardUses(card);
+  const showMomentary = uses.ataque || uses.defesa || card.actionType === 'equipment';
+  const setNumber = (key: keyof Card, text: string) => {
+    const value = Number(text.replace(/[^\d.-]/g, ''));
+    onChange({ [key]: Number.isFinite(value) ? value : undefined } as Partial<Card>);
+  };
+  const toggle = (key: keyof Card) => onChange({ [key]: !card[key] } as Partial<Card>);
+  const toggleUse = (type: BattleUseType) => {
+    const key = type === 'ataque' ? 'countsAsAttack' : type === 'defesa' ? 'countsAsDefense' : type === 'movimentação' ? 'countsAsMovement' : undefined;
+    if (!key) return onChange({ battleUseType: 'suporte' });
+    const nextValue = !card[key];
+    onChange({ [key]: nextValue, battleUseType: nextValue ? type : card.battleUseType } as Partial<Card>);
+  };
   return (
     <View>
       <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 10 }}>
@@ -877,15 +933,38 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
         <Text style={styles.pickName}>{[`${card.name} — ${card.rank || 'E'}`, formatSpeed(card.speed)].filter(Boolean).join(' • ')}</Text>
       </View>
       <Input label="Legenda (desta jogada)" value={card.caption} onChangeText={(t) => onChange({ caption: t })} multiline numberOfLines={3} style={{ minHeight: 70, textAlignVertical: 'top' }} testID="online-play-card-caption" />
+      <Text style={styles.label}>Ajuste da jogada</Text>
+      <View style={styles.chipsRow}>
+        {PLAY_USE_TYPES.map(type => (
+          <Chip key={type} label={type[0].toUpperCase() + type.slice(1)} active={!!uses[type as keyof typeof uses]} onPress={() => toggleUse(type)} testID={`online-play-use-${card.id}-${type}`} />
+        ))}
+      </View>
+      <Text style={styles.label}>Alvo dinâmico</Text>
+      <View style={styles.chipsRow}>
+        {TARGET_SHAPES.map(shape => (
+          <Chip key={shape} label={shape === 'área com quantidade' ? 'Área com quantidade' : shape === 'área total' ? 'Área total' : 'Único'} active={normalizeTargetShape(card.targetShape) === shape} onPress={() => onChange({ targetShape: shape })} testID={`online-play-shape-${card.id}-${shape}`} />
+        ))}
+      </View>
+      <Input label="Máximo de alvos nesta jogada" value={card.maxTargets != null ? String(card.maxTargets) : ''} onChangeText={(text) => setNumber('maxTargets', text)} keyboardType="numeric" testID={`online-play-max-targets-${card.id}`} />
+      <Input label="Alvos reais nesta jogada" value={card.actualTargets != null ? String(card.actualTargets) : ''} onChangeText={(text) => setNumber('actualTargets', text)} keyboardType="numeric" />
+      {(uses.ataque || card.actionType === 'equipment') ? (
+        <>
+          <Text style={styles.label}>Ignorar DEF</Text>
+          <View style={styles.chipsRow}>
+            <Chip label="Ignora DEF C.T" active={!!card.ignoresCTDefense} onPress={() => toggle('ignoresCTDefense')} testID={`online-play-ignore-ct-${card.id}`} />
+            <Chip label="Ignora DEF C.T + Modo" active={!!card.ignoresCommonDefense} onPress={() => toggle('ignoresCommonDefense')} testID={`online-play-ignore-mode-${card.id}`} />
+          </View>
+        </>
+      ) : null}
       {showMomentary ? (
         <>
           <Text style={styles.label}>Valor momentâneo</Text>
           <AttrEditor
-            label={card.actionType === 'defense' ? 'Defesa momentânea' : card.actionType === 'equipment' ? 'Atk/Def da arma' : 'Ataque momentâneo'}
+            label={uses.defesa && !uses.ataque ? 'Defesa momentânea' : card.actionType === 'equipment' ? 'Atk/Def da arma' : 'Ataque momentâneo'}
             values={card.momentaryAttrs || {}}
             setValues={(v) => onChange({ momentaryAttrs: v })}
             keyPrefix={`online-play-momentary-${card.id}`}
-            allowedAttrs={card.actionType === 'attack' ? ['Atk'] : card.actionType === 'defense' ? ['Def'] : ['Atk', 'Def']}
+            allowedAttrs={uses.ataque && uses.defesa || card.actionType === 'equipment' ? ['Atk', 'Def'] : uses.defesa ? ['Def'] : ['Atk']}
           />
           <Text style={styles.label}>Usar atributo do O C.T/alvo no cálculo?</Text>
           <View style={styles.chipsRow}>
@@ -993,6 +1072,8 @@ const styles = StyleSheet.create({
   pickSub: { color: theme.colors.textSecondary, fontSize: 11 },
   chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
   checklistBox: { gap: 7, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, padding: 12 },
+  checkCardItem: { backgroundColor: 'rgba(0,0,0,0.22)', borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border, padding: 10, gap: 5 },
+  checkCardActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   inlineRank: { alignSelf: 'flex-start', color: '#fff', backgroundColor: theme.colors.primary, overflow: 'hidden', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1, fontSize: 10, fontWeight: '900', marginTop: 2 },
   inlineRankSpecial: { backgroundColor: theme.colors.gold },
   zoomWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', alignItems: 'center', justifyContent: 'center' },

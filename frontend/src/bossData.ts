@@ -89,15 +89,15 @@ export const KAELZOR_BOSS_CARDS: BossCard[] = [
   { id: 'passo-instavel-boss', name: 'Passo Instável', kind: 'movement', rank: 'B', speed: 3, cost: { ENE: 70000, Ag: 40000 }, movementRange: 'curto', movementType: 'esquiva', notes: 'Esquiva curta do vazio rachado.' },
   { id: 'deslocamento-vazio-rachado-boss', name: 'Deslocamento do Vazio Rachado', kind: 'movement', rank: 'B', speed: 5, cost: { ENE: 120000, Ag: 80000 }, movementRange: 'médio', movementType: 'deslocamento dimensional', notes: 'Reposicionamento rápido até Speed 5.' },
   { id: 'barreira-rachada-boss', name: 'Barreira Rachada', kind: 'defense', rank: 'B', speed: 3, def: 450000, cost: { ENE: 90000 }, notes: 'Defesa frontal.' },
-  { id: 'cupula-vazio-boss', name: 'Cúpula do Vazio', kind: 'defense', rank: 'B', speed: 3, def: 600000, cost: { ENE: 160000 }, maxTargets: 100, targetShape: 'todos ao redor', notes: 'Defesa de área para ataques de vários lados.' },
+  { id: 'cupula-vazio-boss', name: 'Cúpula do Vazio', kind: 'defense', rank: 'B', speed: 3, def: 600000, cost: { ENE: 160000 }, maxTargets: 100, targetShape: 'área total', notes: 'Defesa de área para ataques de vários lados.' },
   { id: 'reflexo-abissal-boss', name: 'Reflexo Abissal', kind: 'defense', rank: 'B', speed: 5, def: 500000, cost: { ENE: 180000 }, cooldownTurns: 1, notes: 'Defende e pode refletir ataques até 500.000.' },
   { id: 'armadura-abismo-partido-boss', name: 'Armadura do Abismo Partido', kind: 'equipment', rank: 'B', def: 200000, cost: { ENE: 120000 }, notes: 'Equipamento defensivo do fragmento.' },
   { id: 'fragmento-vazio-boss', name: 'Fragmento do Vazio', kind: 'mode', rank: 'B', atk: 100000, def: 100000, cost: { ENE: 150000 }, notes: 'Modo base do fragmento selado.' },
   { id: 'corte-vazio-boss', name: 'Corte do Vazio', kind: 'attack', rank: 'B', speed: 3, atk: 300000, cost: { ENE: 100000 }, maxTargets: 1, targetShape: 'único', notes: 'Ataque contra um alvo.' },
-  { id: 'lanca-fragmentada-boss', name: 'Lança Fragmentada', kind: 'attack', rank: 'B', speed: 4, atk: 420000, cost: { ENE: 140000 }, maxTargets: 3, targetShape: 'linha', notes: 'Perfura até três alvos.' },
-  { id: 'chuva-estilhacos-rubros-boss', name: 'Chuva de Estilhaços Rubros', kind: 'attack', rank: 'B', speed: 3, atk: 380000, cost: { ENE: 180000 }, maxTargets: 20, targetShape: 'área', notes: 'Pressiona grupos médios.' },
-  { id: 'onda-abismo-partido-boss', name: 'Onda do Abismo Partido', kind: 'attack', rank: 'B', speed: 3, atk: 520000, cost: { ENE: 220000 }, maxTargets: 50, targetShape: 'linha', notes: 'Varre muitos alvos alinhados.' },
-  { id: 'ruptura-vazio-menor-boss', name: 'Ruptura do Vazio Menor', kind: 'attack', rank: 'B', speed: 2, atk: 650000, cost: { ENE: 300000 }, maxTargets: 100, targetShape: 'área', cooldownTurns: 1, notes: 'Ataque amplo. Não deve ser usado em turnos consecutivos.' },
+  { id: 'lanca-fragmentada-boss', name: 'Lança Fragmentada', kind: 'attack', rank: 'B', speed: 4, atk: 420000, cost: { ENE: 140000 }, maxTargets: 3, targetShape: 'área com quantidade', notes: 'Perfura até três alvos.' },
+  { id: 'chuva-estilhacos-rubros-boss', name: 'Chuva de Estilhaços Rubros', kind: 'attack', rank: 'B', speed: 3, atk: 380000, cost: { ENE: 180000 }, maxTargets: 20, targetShape: 'área com quantidade', notes: 'Pressiona grupos médios.' },
+  { id: 'onda-abismo-partido-boss', name: 'Onda do Abismo Partido', kind: 'attack', rank: 'B', speed: 3, atk: 520000, cost: { ENE: 220000 }, maxTargets: 50, targetShape: 'área com quantidade', notes: 'Varre muitos alvos alinhados.' },
+  { id: 'ruptura-vazio-menor-boss', name: 'Ruptura do Vazio Menor', kind: 'attack', rank: 'B', speed: 2, atk: 650000, cost: { ENE: 300000 }, maxTargets: 100, targetShape: 'área total', cooldownTurns: 1, notes: 'Ataque amplo. Não deve ser usado em turnos consecutivos.' },
 ];
 
 export function createKaelzorState(difficulty: BossDifficulty = 'facil'): BossState {
@@ -147,7 +147,7 @@ export function bossCard(id: string) {
 
 function bossCardType(kind: BossCardKind): { cardType: CardType; actionType: CardActionType } {
   if (kind === 'attack') return { cardType: 'técnica', actionType: 'attack' };
-  if (kind === 'movement') return { cardType: 'movimentação', actionType: 'movement' };
+  if (kind === 'movement') return { cardType: 'técnica', actionType: 'movement' };
   if (kind === 'perception') return { cardType: 'percepção/rastreamento/reação', actionType: 'perception' };
   if (kind === 'defense' || kind === 'mental') return { cardType: 'técnica', actionType: 'defense' };
   if (kind === 'equipment') return { cardType: 'arma/equipamento', actionType: 'equipment' };
@@ -184,6 +184,10 @@ export function bossCardToSnapshot(card: BossCard, extraCaption?: string): Card 
     tracksMovement: card.tracksMovement,
     maxTargets: card.maxTargets,
     targetShape: card.targetShape,
+    battleUseType: card.kind === 'attack' ? 'ataque' : card.kind === 'defense' || card.kind === 'mental' ? 'defesa' : card.kind === 'movement' ? 'movimentação' : 'suporte',
+    countsAsAttack: card.kind === 'attack',
+    countsAsDefense: card.kind === 'defense' || card.kind === 'mental',
+    countsAsMovement: card.kind === 'movement',
     momentaryAttrs: {
       ...(card.atk ? { Atk: card.atk } : {}),
       ...(card.def ? { Def: card.def } : {}),

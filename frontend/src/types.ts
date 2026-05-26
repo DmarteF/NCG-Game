@@ -13,7 +13,17 @@ export type UnlimitedFlags = Partial<Record<Attr, boolean>>;
 export type CardEffect = 'none' | 'cost' | 'boost' | 'cost_boost' | 'unlimited' | 'cost_unlimited' | 'boost_unlimited' | 'cost_boost_unlimited';
 export type EntityType = 'invocação' | 'marionete' | 'edo tensei';
 export type CardActionType = 'attribute' | 'attack' | 'defense' | 'equipment' | 'mode' | 'entity' | 'movement' | 'diverse_summon' | 'perception';
-export type CardType = 'técnica' | 'modo/buff' | 'arma/equipamento' | 'invocação' | 'edo tensei' | 'marionete' | 'movimentação' | 'invocação diversa' | 'percepção/rastreamento/reação';
+export type CardType =
+  | 'técnica'
+  | 'modo/buff'
+  | 'arma/equipamento'
+  | 'invocação'
+  | 'edo tensei'
+  | 'marionete'
+  | 'invocação diversa'
+  | 'percepção/rastreamento/reação'
+  // Legacy values kept so old saved cards keep loading.
+  | 'movimentação';
 export type DurationType = 'instantâneo' | 'turnos' | 'persistente';
 export type StackBehavior = 'stack' | 'replace';
 export type CardSpeed = number | 'instant';
@@ -21,12 +31,23 @@ export type BossDifficulty = 'facil' | 'medio' | 'dificil' | 'impossivel';
 export type MovementRange = 'curto' | 'médio' | 'longo' | 'global/dimensional';
 export type MovementType = 'avanço' | 'recuo' | 'esquiva' | 'aproximação' | 'reposicionamento' | 'voo' | 'teleporte' | 'deslocamento dimensional';
 export type DiverseSummonType = 'clone' | 'grupo' | 'enxame' | 'constructo' | 'invocação menor' | 'objeto invocado';
-export type TargetShape = 'único' | 'área' | 'linha' | 'cone' | 'todos ao redor' | 'grupo';
+export type TargetShape =
+  | 'único'
+  | 'área com quantidade'
+  | 'área total'
+  // Legacy values kept so old saved cards keep loading.
+  | 'área'
+  | 'linha'
+  | 'cone'
+  | 'todos ao redor'
+  | 'grupo';
 export type SensoryType = 'percepção' | 'detecção' | 'rastreamento' | 'leitura sensorial' | 'reação' | 'reação instantânea';
 export type BattleUseType =
   | 'ataque'
   | 'defesa'
   | 'movimentação'
+  | 'suporte'
+  // Legacy values kept so old saved cards keep loading.
   | 'esquiva'
   | 'aproximação'
   | 'recuo'

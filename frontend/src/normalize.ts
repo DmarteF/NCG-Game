@@ -1,16 +1,21 @@
 import { ATTRS, Attr } from './theme';
-import { AttrValues, Card, CardActionType, CardEffect, CardSpeed, CardType, CT, DiverseSummonType, DurationType, EntityType, MovementRange, MovementType, SensoryType, StackBehavior, TargetShape, UnlimitedFlags } from './types';
+import { AttrValues, BattleUseType, Card, CardActionType, CardEffect, CardSpeed, CardType, CT, DiverseSummonType, DurationType, EntityType, MovementRange, MovementType, SensoryType, StackBehavior, TargetShape, UnlimitedFlags } from './types';
 
 const emptyAttrs = (): Record<Attr, number> => ({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
 const validEntityTypes: EntityType[] = ['invocação', 'marionete', 'edo tensei'];
-const validCardTypes: CardType[] = ['técnica', 'modo/buff', 'arma/equipamento', 'invocação', 'edo tensei', 'marionete', 'movimentação', 'invocação diversa', 'percepção/rastreamento/reação'];
+export const SIMPLE_CARD_TYPES: CardType[] = ['técnica', 'modo/buff', 'arma/equipamento', 'invocação', 'invocação diversa', 'edo tensei', 'marionete', 'percepção/rastreamento/reação'];
+export const SIMPLE_BATTLE_USES: BattleUseType[] = ['ataque', 'defesa', 'movimentação', 'suporte'];
+export const SIMPLE_TARGET_SHAPES: TargetShape[] = ['único', 'área com quantidade', 'área total'];
+
+const validCardTypes: CardType[] = [...SIMPLE_CARD_TYPES, 'movimentação'];
 const validActionTypes: CardActionType[] = ['attribute', 'attack', 'defense', 'equipment', 'mode', 'entity', 'movement', 'diverse_summon', 'perception'];
 const validDurationTypes: DurationType[] = ['instantâneo', 'turnos', 'persistente'];
 const validStack: StackBehavior[] = ['stack', 'replace'];
 const validMovementRanges: MovementRange[] = ['curto', 'médio', 'longo', 'global/dimensional'];
 const validMovementTypes: MovementType[] = ['avanço', 'recuo', 'esquiva', 'aproximação', 'reposicionamento', 'voo', 'teleporte', 'deslocamento dimensional'];
 const validDiverseSummonTypes: DiverseSummonType[] = ['clone', 'grupo', 'enxame', 'constructo', 'invocação menor', 'objeto invocado'];
-const validTargetShapes: TargetShape[] = ['único', 'área', 'linha', 'cone', 'todos ao redor', 'grupo'];
+const validTargetShapes: TargetShape[] = [...SIMPLE_TARGET_SHAPES, 'área', 'linha', 'cone', 'todos ao redor', 'grupo'];
+const validBattleUses: BattleUseType[] = [...SIMPLE_BATTLE_USES, 'esquiva', 'aproximação', 'recuo', 'reposicionamento', 'ataque + movimentação', 'ataque + esquiva', 'defesa + movimentação'];
 const validSensoryTypes: SensoryType[] = ['percepção', 'detecção', 'rastreamento', 'leitura sensorial', 'reação', 'reação instantânea'];
 
 function cleanAttrValues(values?: AttrValues): AttrValues {
@@ -56,6 +61,52 @@ function cleanOption<T extends string>(value: unknown, valid: readonly T[]): T |
 function cleanPositiveNumber(value: unknown) {
   const n = Math.trunc(Number(value || 0));
   return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+export function normalizeCardTypeForUi(cardType?: CardType): CardType {
+  return cardType === 'movimentação' ? 'técnica' : cardType || 'técnica';
+}
+
+export function normalizeTargetShape(shape?: TargetShape): TargetShape | undefined {
+  if (!shape) return undefined;
+  if (shape === 'linha' || shape === 'cone' || shape === 'grupo' || shape === 'área') return 'área com quantidade';
+  if (shape === 'todos ao redor') return 'área total';
+  return shape;
+}
+
+export function normalizeBattleUse(use?: BattleUseType): BattleUseType | undefined {
+  if (!use) return undefined;
+  if (use === 'esquiva' || use === 'aproximação' || use === 'recuo' || use === 'reposicionamento') return 'movimentação';
+  if (use.includes('ataque')) return 'ataque';
+  if (use.includes('defesa')) return 'defesa';
+  return use;
+}
+
+export function cardUses(card: Partial<Card>): Record<'ataque' | 'defesa' | 'movimentação' | 'suporte', boolean> {
+  const use = card.battleUseType;
+  return {
+    ataque: !!(card.countsAsAttack || card.actionType === 'attack' || use?.includes('ataque')),
+    defesa: !!(card.countsAsDefense || card.actionType === 'defense' || use?.includes('defesa')),
+    movimentação: !!(card.countsAsMovement || card.countsAsDodge || card.actionType === 'movement' || card.cardType === 'movimentação' || use?.includes('movimentação') || ['esquiva', 'aproximação', 'recuo', 'reposicionamento'].includes(use || '')),
+    suporte: !!(card.actionType === 'attribute' || card.actionType === 'mode' || card.actionType === 'entity' || card.actionType === 'diverse_summon' || card.actionType === 'perception' || ['modo/buff', 'invocação', 'invocação diversa', 'edo tensei', 'marionete', 'percepção/rastreamento/reação'].includes(card.cardType || '') || use === 'suporte'),
+  };
+}
+
+export function battleUseLabel(card: Partial<Card>) {
+  const uses = cardUses(card);
+  return SIMPLE_BATTLE_USES.filter(use => uses[use as keyof typeof uses]).map(use => use[0].toUpperCase() + use.slice(1)).join(' + ') || (card.battleUseType || 'Suporte');
+}
+
+export function targetShapeLabel(shape?: TargetShape) {
+  return normalizeTargetShape(shape) || shape;
+}
+
+export function ignoresCTDefense(card: Partial<Card>) {
+  return !!(card.ignoresCTDefense || card.directHpDamage || card.piercing);
+}
+
+export function ignoresCTAndModeDefense(card: Partial<Card>) {
+  return !!card.ignoresCommonDefense;
 }
 
 function inferEffect(card: Partial<Card>): CardEffect {
@@ -130,7 +181,27 @@ export function normalizeCard(card: Partial<Card>): Card {
     summonDefIndividual: cleanPositiveNumber(card.summonDefIndividual),
     targetCount: cleanPositiveNumber(card.targetCount),
     maxTargets: cleanPositiveNumber(card.maxTargets),
-    targetShape: cleanOption(card.targetShape, validTargetShapes),
+    targetShape: normalizeTargetShape(cleanOption(card.targetShape, validTargetShapes)),
+    battleUseType: normalizeBattleUse(cleanOption(card.battleUseType, validBattleUses)),
+    costTargetLabel: card.costTargetLabel,
+    effectTargetLabel: card.effectTargetLabel,
+    combatTargetKind: card.combatTargetKind,
+    fieldPosition: card.fieldPosition,
+    actualTargets: cleanPositiveNumber(card.actualTargets),
+    ignoresCTDefense: ignoresCTDefense(card),
+    ignoresCommonDefense: ignoresCTAndModeDefense(card),
+    directHpDamage: undefined,
+    piercing: undefined,
+    compatibleDefenseOnly: !!card.compatibleDefenseOnly,
+    stoppedBySpecificDefense: !!card.stoppedBySpecificDefense,
+    compatibleDefenseNote: card.compatibleDefenseNote,
+    countsAsAttack: cardUses(card).ataque,
+    countsAsDefense: cardUses(card).defesa,
+    countsAsMovement: cardUses(card).movimentação,
+    countsAsDodge: undefined,
+    offensiveMovement: !!card.offensiveMovement,
+    evasiveMovement: !!card.evasiveMovement,
+    temporaryNote: card.temporaryNote,
     durationType: card.durationType && validDurationTypes.includes(card.durationType) ? card.durationType : card.durationType && ['manual', 'destruir', 'luta'].includes(card.durationType) ? 'persistente' : 'instantâneo',
     durationTurns: Math.max(0, Math.trunc(Number(card.durationTurns || 0))),
     upkeepCost: cleanAttrValues(card.upkeepCost),

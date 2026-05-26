@@ -11,6 +11,7 @@ import { BattleUseType, Card, CardActionType, CardEffect, AttrValues, UnlimitedF
 import { ATTRS, Attr, theme, CARD_RANKS, CardRank } from '../src/theme';
 import { Header } from './profile';
 import { formatNumberBR } from '../src/format';
+import { SIMPLE_BATTLE_USES, SIMPLE_CARD_TYPES, SIMPLE_TARGET_SHAPES, cardUses, normalizeBattleUse, normalizeCardTypeForUi, normalizeTargetShape } from '../src/normalize';
 
 const EFFECTS: { id: CardEffect; label: string }[] = [
   { id: 'none', label: 'Sem efeito' },
@@ -23,32 +24,17 @@ const EFFECTS: { id: CardEffect; label: string }[] = [
   { id: 'cost_boost_unlimited', label: 'Custo + aumento + ilimitado' },
 ];
 const ENTITY_TYPES: EntityType[] = ['invocação', 'marionete', 'edo tensei'];
-const CARD_TYPES: { id: CardType; label: string }[] = [
-  { id: 'técnica', label: 'Técnica' },
-  { id: 'movimentação', label: 'Movimentação' },
-  { id: 'modo/buff', label: 'Modo/buff' },
-  { id: 'arma/equipamento', label: 'Arma/equip.' },
-  { id: 'invocação', label: 'Invocação' },
-  { id: 'invocação diversa', label: 'Invocação diversa' },
-  { id: 'edo tensei', label: 'Edo tensei' },
-  { id: 'marionete', label: 'Marionete' },
-  { id: 'percepção/rastreamento/reação', label: 'Percepção/reação' },
-];
+const CARD_TYPES: { id: CardType; label: string }[] = SIMPLE_CARD_TYPES.map(id => ({
+  id,
+  label: id === 'arma/equipamento' ? 'Arma/equip.'
+    : id === 'invocação diversa' ? 'Invocação diversa/Clone'
+    : id === 'percepção/rastreamento/reação' ? 'Percepção/reação'
+    : id[0].toUpperCase() + id.slice(1),
+}));
 const DURATIONS: { id: DurationType; label: string }[] = [
   { id: 'instantâneo', label: 'Instantâneo' },
   { id: 'turnos', label: 'Por turnos' },
   { id: 'persistente', label: 'Persistente' },
-];
-const ACTION_TYPES: { id: CardActionType; label: string }[] = [
-  { id: 'attribute', label: 'Atributo/buff' },
-  { id: 'attack', label: 'Ataque' },
-  { id: 'defense', label: 'Defesa' },
-  { id: 'equipment', label: 'Arma/equip.' },
-  { id: 'mode', label: 'Modo' },
-  { id: 'entity', label: 'Invocação' },
-  { id: 'movement', label: 'Movimentação' },
-  { id: 'diverse_summon', label: 'Invocação diversa' },
-  { id: 'perception', label: 'Percepção/reação' },
 ];
 const MOVEMENT_RANGES: { id: MovementRange; label: string }[] = [
   { id: 'curto', label: 'Curto' },
@@ -74,14 +60,10 @@ const DIVERSE_SUMMON_TYPES: { id: DiverseSummonType; label: string }[] = [
   { id: 'invocação menor', label: 'Invocação menor' },
   { id: 'objeto invocado', label: 'Objeto invocado' },
 ];
-const TARGET_SHAPES: { id: TargetShape; label: string }[] = [
-  { id: 'único', label: 'Único' },
-  { id: 'área', label: 'Área' },
-  { id: 'linha', label: 'Linha' },
-  { id: 'cone', label: 'Cone' },
-  { id: 'todos ao redor', label: 'Todos ao redor' },
-  { id: 'grupo', label: 'Grupo' },
-];
+const TARGET_SHAPES: { id: TargetShape; label: string }[] = SIMPLE_TARGET_SHAPES.map(id => ({
+  id,
+  label: id === 'área com quantidade' ? 'Área com quantidade' : id === 'área total' ? 'Área total' : 'Único',
+}));
 const SENSORY_TYPES: { id: SensoryType; label: string }[] = [
   { id: 'percepção', label: 'Percepção' },
   { id: 'detecção', label: 'Detecção' },
@@ -97,18 +79,7 @@ const SENSOR_FLAGS: { key: 'detectsInvisibility' | 'detectsChakra' | 'detectsPre
   { key: 'tracksTarget', label: 'Rastreia alvo' },
   { key: 'tracksMovement', label: 'Rastreia movimento' },
 ];
-const BATTLE_USE_TYPES: { id: BattleUseType; label: string }[] = [
-  { id: 'ataque', label: 'Ataque' },
-  { id: 'defesa', label: 'Defesa' },
-  { id: 'movimentação', label: 'Movimentação' },
-  { id: 'esquiva', label: 'Esquiva' },
-  { id: 'aproximação', label: 'Aproximação' },
-  { id: 'recuo', label: 'Recuo' },
-  { id: 'reposicionamento', label: 'Reposicionamento' },
-  { id: 'ataque + movimentação', label: 'Ataque + mov.' },
-  { id: 'ataque + esquiva', label: 'Ataque + esquiva' },
-  { id: 'defesa + movimentação', label: 'Defesa + mov.' },
-];
+const BATTLE_USE_TYPES: { id: BattleUseType; label: string }[] = SIMPLE_BATTLE_USES.map(id => ({ id, label: id[0].toUpperCase() + id.slice(1) }));
 const SPEED_OPTIONS: { value: CardSpeed | undefined; label: string }[] = [
   { value: undefined, label: 'Sem Speed' },
   { value: 0, label: 'Speed 0' },
@@ -122,6 +93,17 @@ const SPEED_OPTIONS: { value: CardSpeed | undefined; label: string }[] = [
   { value: 8, label: 'Speed 8' },
   { value: 'instant', label: 'Instantânea' },
 ];
+
+function inferActionType(cardType: CardType, flags: Record<string, boolean>): CardActionType {
+  if (cardType === 'arma/equipamento') return 'equipment';
+  if (cardType === 'modo/buff') return 'mode';
+  if (cardType === 'invocação diversa') return 'diverse_summon';
+  if (cardType === 'percepção/rastreamento/reação') return 'perception';
+  if (['invocação', 'edo tensei', 'marionete'].includes(cardType)) return 'entity';
+  if (flags.countsAsAttack) return 'attack';
+  if (flags.countsAsDefense) return 'defense';
+  return 'attribute';
+}
 
 export default function CardEdit() {
   const { id } = useLocalSearchParams<{ id?: string }>();
@@ -171,7 +153,7 @@ export default function CardEdit() {
       if (c) {
         setName(c.name); setCaption(c.caption); setImage(c.image);
         setRank(c.rank || 'E'); setSpeed(normalizeSpeed(c.speed)); setEntityType(c.entityType);
-        setCardType(c.cardType || (c.entityType ? c.entityType === 'edo tensei' ? 'edo tensei' : c.entityType === 'marionete' ? 'marionete' : 'invocação' : 'técnica'));
+        setCardType(normalizeCardTypeForUi(c.cardType || (c.entityType ? c.entityType === 'edo tensei' ? 'edo tensei' : c.entityType === 'marionete' ? 'marionete' : 'invocação' : 'técnica')));
         setActionType(c.actionType || (c.entityType ? 'entity' : 'attribute'));
         setMomentaryAttrs(c.momentaryAttrs || {});
         setUseCTInfluence(!!c.useCTInfluence);
@@ -196,19 +178,17 @@ export default function CardEdit() {
         setSummonDefIndividual(c.summonDefIndividual || 0);
         setTargetCount(c.targetCount || 0);
         setMaxTargets(c.maxTargets || 0);
-        setTargetShape(c.targetShape);
-        setBattleUseType(c.battleUseType);
+        setTargetShape(normalizeTargetShape(c.targetShape));
+        setBattleUseType(normalizeBattleUse(c.battleUseType));
         setCombatFlags({
-          ignoresCTDefense: !!c.ignoresCTDefense,
+          ignoresCTDefense: !!(c.ignoresCTDefense || c.directHpDamage || c.piercing),
           ignoresCommonDefense: !!c.ignoresCommonDefense,
-          directHpDamage: !!c.directHpDamage,
-          piercing: !!c.piercing,
           compatibleDefenseOnly: !!c.compatibleDefenseOnly,
           stoppedBySpecificDefense: !!c.stoppedBySpecificDefense,
-          countsAsAttack: !!c.countsAsAttack,
-          countsAsDefense: !!c.countsAsDefense,
-          countsAsMovement: !!c.countsAsMovement,
-          countsAsDodge: !!c.countsAsDodge,
+          countsAsAttack: cardUses(c).ataque,
+          countsAsDefense: cardUses(c).defesa,
+          countsAsMovement: cardUses(c).movimentação,
+          countsAsSupport: cardUses(c).suporte,
           offensiveMovement: !!c.offensiveMovement,
           evasiveMovement: !!c.evasiveMovement,
         });
@@ -224,6 +204,7 @@ export default function CardEdit() {
 
   const save = async () => {
     if (!name.trim()) return Alert.alert('Atenção', 'Informe o nome do card.');
+    const inferredActionType = inferActionType(cardType, combatFlags);
     const card: Card = {
       id: id || uid(),
       name: name.trim(),
@@ -232,41 +213,41 @@ export default function CardEdit() {
       rank,
       speed: normalizeSpeed(speed),
       cardType,
-      actionType,
+      actionType: inferredActionType,
       momentaryAttrs: cleanAttrs(momentaryAttrs),
       useCTInfluence,
-      movementRange: actionType === 'movement' ? movementRange : undefined,
-      movementType: actionType === 'movement' ? movementType : undefined,
-      sensoryType: actionType === 'perception' ? sensoryType : undefined,
-      detectsUntilSpeed: actionType === 'perception' ? normalizeSpeed(detectsUntilSpeed) : undefined,
-      reactionUntilSpeed: actionType === 'perception' ? normalizeSpeed(reactionUntilSpeed) : undefined,
-      reducesSpeedBy: actionType === 'perception' ? cleanOptionalNum(reducesSpeedBy) : undefined,
-      detectsInvisibility: actionType === 'perception' ? !!sensorFlags.detectsInvisibility : undefined,
-      detectsChakra: actionType === 'perception' ? !!sensorFlags.detectsChakra : undefined,
-      detectsPresence: actionType === 'perception' ? !!sensorFlags.detectsPresence : undefined,
-      tracksTarget: actionType === 'perception' ? !!sensorFlags.tracksTarget : undefined,
-      tracksMovement: actionType === 'perception' ? !!sensorFlags.tracksMovement : undefined,
-      summonType: actionType === 'diverse_summon' ? summonType : undefined,
-      summonQuantity: actionType === 'diverse_summon' ? cleanOptionalNum(summonQuantity) : undefined,
-      summonHpIndividual: actionType === 'diverse_summon' ? cleanOptionalNum(summonHpIndividual) : undefined,
-      summonHpTotal: actionType === 'diverse_summon' ? cleanOptionalNum(summonHpTotal) : undefined,
-      summonAtkIndividual: actionType === 'diverse_summon' ? cleanOptionalNum(summonAtkIndividual) : undefined,
-      summonDefIndividual: actionType === 'diverse_summon' ? cleanOptionalNum(summonDefIndividual) : undefined,
+      movementRange: showMovementFields ? movementRange : undefined,
+      movementType: showMovementFields ? movementType : undefined,
+      sensoryType: showPerceptionFields ? sensoryType : undefined,
+      detectsUntilSpeed: showPerceptionFields ? normalizeSpeed(detectsUntilSpeed) : undefined,
+      reactionUntilSpeed: showPerceptionFields ? normalizeSpeed(reactionUntilSpeed) : undefined,
+      reducesSpeedBy: showPerceptionFields ? cleanOptionalNum(reducesSpeedBy) : undefined,
+      detectsInvisibility: showPerceptionFields ? !!sensorFlags.detectsInvisibility : undefined,
+      detectsChakra: showPerceptionFields ? !!sensorFlags.detectsChakra : undefined,
+      detectsPresence: showPerceptionFields ? !!sensorFlags.detectsPresence : undefined,
+      tracksTarget: showPerceptionFields ? !!sensorFlags.tracksTarget : undefined,
+      tracksMovement: showPerceptionFields ? !!sensorFlags.tracksMovement : undefined,
+      summonType: showDiverseSummonFields ? summonType : undefined,
+      summonQuantity: showDiverseSummonFields ? cleanOptionalNum(summonQuantity) : undefined,
+      summonHpIndividual: showDiverseSummonFields ? cleanOptionalNum(summonHpIndividual) : undefined,
+      summonHpTotal: showDiverseSummonFields ? cleanOptionalNum(summonHpTotal) : undefined,
+      summonAtkIndividual: showDiverseSummonFields ? cleanOptionalNum(summonAtkIndividual) : undefined,
+      summonDefIndividual: showDiverseSummonFields ? cleanOptionalNum(summonDefIndividual) : undefined,
       targetCount: showTargeting ? cleanOptionalNum(targetCount) : undefined,
       maxTargets: showTargeting ? cleanOptionalNum(maxTargets) : undefined,
       targetShape: showTargeting ? targetShape : undefined,
-      battleUseType,
+      battleUseType: normalizeBattleUse(battleUseType) || (combatFlags.countsAsAttack ? 'ataque' : combatFlags.countsAsDefense ? 'defesa' : combatFlags.countsAsMovement ? 'movimentação' : 'suporte'),
       ignoresCTDefense: !!combatFlags.ignoresCTDefense,
       ignoresCommonDefense: !!combatFlags.ignoresCommonDefense,
-      directHpDamage: !!combatFlags.directHpDamage,
-      piercing: !!combatFlags.piercing,
+      directHpDamage: undefined,
+      piercing: undefined,
       compatibleDefenseOnly: !!combatFlags.compatibleDefenseOnly,
       stoppedBySpecificDefense: !!combatFlags.stoppedBySpecificDefense,
       compatibleDefenseNote: compatibleDefenseNote.trim() || undefined,
       countsAsAttack: !!combatFlags.countsAsAttack,
       countsAsDefense: !!combatFlags.countsAsDefense,
       countsAsMovement: !!combatFlags.countsAsMovement,
-      countsAsDodge: !!combatFlags.countsAsDodge,
+      countsAsDodge: undefined,
       offensiveMovement: !!combatFlags.offensiveMovement,
       evasiveMovement: !!combatFlags.evasiveMovement,
       durationType,
@@ -286,12 +267,22 @@ export default function CardEdit() {
     router.back();
   };
 
-  const showMomentary = actionType === 'attack' || actionType === 'defense' || actionType === 'equipment';
+  const uses = {
+    ataque: !!combatFlags.countsAsAttack || battleUseType === 'ataque',
+    defesa: !!combatFlags.countsAsDefense || battleUseType === 'defesa',
+    movimentação: !!combatFlags.countsAsMovement || battleUseType === 'movimentação',
+    suporte: !!combatFlags.countsAsSupport || battleUseType === 'suporte',
+  };
+  const showMomentary = uses.ataque || uses.defesa || cardType === 'arma/equipamento';
   const showCost = effectHasCost(effect);
   const showBoost = effectHasBoost(effect);
   const showUnlimited = effectHasUnlimited(effect);
-  const showTargeting = actionType === 'attack' || actionType === 'diverse_summon';
+  const showTargeting = uses.ataque || cardType === 'invocação diversa';
   const showEntityFields = actionType === 'entity' || ['invocação', 'edo tensei', 'marionete'].includes(cardType);
+  const showMovementFields = uses.movimentação;
+  const showDiverseSummonFields = cardType === 'invocação diversa';
+  const showPerceptionFields = cardType === 'percepção/rastreamento/reação';
+  const showIgnoreDefense = uses.ataque || cardType === 'arma/equipamento';
 
   return (
     <Screen testID="card-edit-screen">
@@ -335,10 +326,6 @@ export default function CardEdit() {
               setCardType(t.id);
               if (t.id === 'arma/equipamento') setActionType('equipment');
               if (t.id === 'modo/buff') setActionType('mode');
-              if (t.id === 'movimentação') {
-                setActionType('movement');
-                setEntityType(undefined);
-              }
               if (t.id === 'invocação diversa') {
                 setActionType('diverse_summon');
                 setEntityType(undefined);
@@ -357,40 +344,14 @@ export default function CardEdit() {
         ))}
       </View>
 
-      <Text style={styles.label}>Tipo de uso</Text>
-      <View style={styles.chipsRow}>
-        {ACTION_TYPES.map(a => (
-          <Chip
-            key={a.id}
-            label={a.label}
-            active={actionType === a.id}
-            onPress={() => {
-              setActionType(a.id);
-              if (a.id === 'entity') setEntityType(entityType || 'invocação');
-              if (a.id === 'movement') setCardType('movimentação');
-              if (a.id === 'diverse_summon') {
-                setCardType('invocação diversa');
-                setEntityType(undefined);
-              }
-              if (a.id === 'perception') {
-                setCardType('percepção/rastreamento/reação');
-                setEntityType(undefined);
-              }
-              if (a.id !== 'entity' && entityType && actionType === 'entity') setEntityType(undefined);
-            }}
-            testID={`card-action-${a.id}`}
-          />
-        ))}
-      </View>
-
       {showMomentary ? (
         <View>
           <AttrEditor
-            label={actionType === 'defense' ? 'Defesa momentânea' : actionType === 'equipment' ? 'Atk/Def da arma' : 'Ataque momentâneo'}
+            label={uses.defesa && !uses.ataque ? 'Defesa' : cardType === 'arma/equipamento' ? 'Atk/Def da arma' : 'Ataque'}
             values={momentaryAttrs}
             setValues={setMomentaryAttrs}
             keyPrefix="momentary"
-            allowedAttrs={actionType === 'attack' ? ['Atk'] : actionType === 'defense' ? ['Def'] : ['Atk', 'Def']}
+            allowedAttrs={uses.ataque && uses.defesa || cardType === 'arma/equipamento' ? ['Atk', 'Def'] : uses.defesa ? ['Def'] : ['Atk']}
           />
           <Text style={styles.label}>Usar atributo do O C.T/alvo no cálculo?</Text>
           <View style={styles.chipsRow}>
@@ -400,7 +361,7 @@ export default function CardEdit() {
         </View>
       ) : null}
 
-      {actionType === 'movement' ? (
+      {showMovementFields ? (
         <View>
           <Text style={styles.label}>Alcance da movimentação</Text>
           <View style={styles.chipsRow}>
@@ -417,7 +378,7 @@ export default function CardEdit() {
         </View>
       ) : null}
 
-      {actionType === 'diverse_summon' ? (
+      {showDiverseSummonFields ? (
         <View>
           <Text style={styles.label}>Tipo de invocação diversa</Text>
           <View style={styles.chipsRow}>
@@ -433,7 +394,7 @@ export default function CardEdit() {
         </View>
       ) : null}
 
-      {actionType === 'perception' ? (
+      {showPerceptionFields ? (
         <View>
           <Text style={styles.label}>Tipo sensorial</Text>
           <View style={styles.chipsRow}>
@@ -503,45 +464,39 @@ export default function CardEdit() {
           <Chip
             key={option.id}
             label={option.label}
-            active={battleUseType === option.id}
-            onPress={() => setBattleUseType(option.id)}
+            active={!!uses[option.id as keyof typeof uses]}
+            onPress={() => {
+              const key = option.id === 'ataque' ? 'countsAsAttack' : option.id === 'defesa' ? 'countsAsDefense' : option.id === 'movimentação' ? 'countsAsMovement' : 'countsAsSupport';
+              setCombatFlags(flags => {
+                const next = { ...flags, [key]: !flags[key] };
+                const first = BATTLE_USE_TYPES.find(item => !!next[item.id === 'ataque' ? 'countsAsAttack' : item.id === 'defesa' ? 'countsAsDefense' : item.id === 'movimentação' ? 'countsAsMovement' : 'countsAsSupport']);
+                setBattleUseType(first?.id);
+                return next;
+              });
+            }}
             testID={`battle-use-${option.id}`}
           />
         ))}
       </View>
 
-      <Text style={styles.label}>Arma / dano direto / híbrido</Text>
-      <View style={styles.chipsRow}>
-        {[
-          ['ignoresCTDefense', 'Ignora DEF do C.T'],
-          ['ignoresCommonDefense', 'Ignora defesa comum'],
-          ['directHpDamage', 'Vai direto no HP'],
-          ['piercing', 'Perfuração'],
-          ['compatibleDefenseOnly', 'Só defesa compatível'],
-          ['stoppedBySpecificDefense', 'Parado por arma/barreira específica'],
-          ['countsAsAttack', 'Conta como ataque'],
-          ['countsAsDefense', 'Conta como defesa'],
-          ['countsAsMovement', 'Conta como movimentação'],
-          ['countsAsDodge', 'Conta como esquiva'],
-          ['offensiveMovement', 'Mov. ofensiva'],
-          ['evasiveMovement', 'Mov. evasiva'],
-        ].map(([key, label]) => (
-          <Chip
-            key={key}
-            label={label}
-            active={!!combatFlags[key]}
-            onPress={() => setCombatFlags(flags => ({ ...flags, [key]: !flags[key] }))}
-            testID={`combat-flag-${key}`}
+      {showIgnoreDefense ? (
+        <>
+          <Text style={styles.label}>Ignorar DEF</Text>
+          <View style={styles.chipsRow}>
+            <Chip label="Ignora DEF C.T" active={!!combatFlags.ignoresCTDefense} onPress={() => setCombatFlags(flags => ({ ...flags, ignoresCTDefense: !flags.ignoresCTDefense }))} testID="combat-flag-ignoresCTDefense" />
+            <Chip label="Ignora DEF C.T + Modo" active={!!combatFlags.ignoresCommonDefense} onPress={() => setCombatFlags(flags => ({ ...flags, ignoresCommonDefense: !flags.ignoresCommonDefense }))} testID="combat-flag-ignoresCommonDefense" />
+            <Chip label="Só defesa compatível" active={!!combatFlags.compatibleDefenseOnly} onPress={() => setCombatFlags(flags => ({ ...flags, compatibleDefenseOnly: !flags.compatibleDefenseOnly }))} testID="combat-flag-compatibleDefenseOnly" />
+            <Chip label="Barreira/arma específica" active={!!combatFlags.stoppedBySpecificDefense} onPress={() => setCombatFlags(flags => ({ ...flags, stoppedBySpecificDefense: !flags.stoppedBySpecificDefense }))} testID="combat-flag-stoppedBySpecificDefense" />
+          </View>
+          <Input
+            label="Defesa compatível / exceção"
+            value={compatibleDefenseNote}
+            onChangeText={setCompatibleDefenseNote}
+            placeholder="Ex: só barreira dimensional ou arma específica bloqueia."
+            testID="compatible-defense-note"
           />
-        ))}
-      </View>
-      <Input
-        label="Defesa compatível / exceção"
-        value={compatibleDefenseNote}
-        onChangeText={setCompatibleDefenseNote}
-        placeholder="Ex: só barreira dimensional ou arma específica bloqueia."
-        testID="compatible-defense-note"
-      />
+        </>
+      ) : null}
 
       {showEntityFields ? (
         <>
