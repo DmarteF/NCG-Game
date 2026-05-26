@@ -21,16 +21,23 @@ const labels: Record<BossDifficulty, string> = {
 
 export default function BossOnlineLobby() {
   const router = useRouter();
-  const { bossDifficulty } = useLocalSearchParams<{ bossDifficulty?: BossDifficulty }>();
+  const { bossDifficulty, matchType: initialMatchType } = useLocalSearchParams<{ bossDifficulty?: BossDifficulty; matchType?: MatchType }>();
   const difficulty = bossDifficulty || 'facil';
   const [mode, setMode] = useState<'home' | 'create' | 'join'>('home');
-  const [matchType, setMatchType] = useState<MatchType>('3xBoss');
+  const [matchType, setMatchType] = useState<MatchType>(initialMatchType === '2xBoss' || initialMatchType === '3xBoss' ? initialMatchType : '2xBoss');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [errMsg, setErrMsg] = useState('');
 
   const goWithProfile = async (role: 'host' | 'guest' | 'spectator', roomCode: string) => {
     const p = await Storage.getProfile();
+    if (matchType === '1xBoss') {
+      router.replace({
+        pathname: '/boss-intro',
+        params: { matchType: '1xBoss', turnMinutes: '0', bossDifficulty: difficulty },
+      });
+      return;
+    }
     router.replace({
       pathname: '/team-online-battle',
       params: {
@@ -106,11 +113,11 @@ export default function BossOnlineLobby() {
         <View style={{ marginTop: 8 }}>
           <Text style={styles.label}>Modo MxH</Text>
           <View style={styles.row}>
-            {(['1xBoss', '2xBoss', '3xBoss'] as MatchType[]).map(item => (
+            {(['2xBoss', '3xBoss'] as MatchType[]).map(item => (
               <Chip key={item} label={item} active={matchType === item} onPress={() => setMatchType(item)} testID={`boss-online-match-${item}`} />
             ))}
           </View>
-          <Text style={styles.hint}>Boss sempre começa. Tempo fixo: 30 min por turno.</Text>
+          <Text style={styles.hint}>1xBoss é solo local. 2xBoss e 3xBoss usam sala online com Boss sincronizado. Tempo fixo: 30 min por turno.</Text>
           <Text style={styles.label}>Sala MxH</Text>
           <Button title="Gerar código da sala Boss" onPress={createRoom} loading={busy} testID="boss-online-create-btn" />
           <Pressable onPress={() => setMode('home')} testID="boss-online-back-mode-btn"><Text style={styles.back}>Voltar</Text></Pressable>

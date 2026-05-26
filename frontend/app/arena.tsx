@@ -18,12 +18,14 @@ const DIFFICULTIES: { id: BossDifficulty; label: string; help: string }[] = [
   { id: 'impossivel', label: 'Impossível', help: 'Cards até Rank S' },
 ];
 
-type ArenaMode = 'select' | 'local' | 'mxh' | 'bossLocal' | 'bossOnline';
+type ArenaMode = 'select' | 'local' | 'mxh' | 'bossConfig';
+type BossConfigMatch = '1xBoss' | '2xBoss' | '3xBoss';
 
 export default function Arena() {
   const router = useRouter();
   const [mode, setMode] = useState<ArenaMode>('select');
   const [matchType, setMatchType] = useState<MatchType>('1x1');
+  const [bossMatchType, setBossMatchType] = useState<BossConfigMatch>('1xBoss');
   const [turnMinutes, setTurnMinutes] = useState<number>(20);
   const [bossDifficulty, setBossDifficulty] = useState<BossDifficulty>('facil');
 
@@ -32,7 +34,7 @@ export default function Arena() {
       setMode('select');
       return;
     }
-    if (mode === 'bossLocal' || mode === 'bossOnline') {
+    if (mode === 'bossConfig') {
       setMode('mxh');
       return;
     }
@@ -51,16 +53,20 @@ export default function Arena() {
     });
   };
 
-  const startBossLocal = async () => {
+  const startBossMatch = async () => {
     const cts = await Storage.getCTs();
     if (cts.length === 0) {
       alert('Crie pelo menos um C.T antes de iniciar a luta.');
       return;
     }
-    router.push({
-      pathname: '/boss-intro',
-      params: { matchType: '1xBoss', turnMinutes: '0', bossDifficulty },
-    });
+    if (bossMatchType === '1xBoss') {
+      router.push({
+        pathname: '/boss-intro',
+        params: { matchType: '1xBoss', turnMinutes: '0', bossDifficulty },
+      });
+      return;
+    }
+    router.push({ pathname: '/boss-online', params: { bossDifficulty, matchType: bossMatchType } });
   };
 
   if (mode === 'select') {
@@ -114,24 +120,28 @@ export default function Arena() {
         </View>
 
         <View style={styles.modeCards}>
-          <Button title="Boss Local" onPress={() => setMode('bossLocal')} testID="mxh-boss-local-btn" />
-          <Text style={styles.modeHelp}>Luta 1x1 local contra Boss, com introdução e dificuldade.</Text>
+          <Button title="1xBoss" onPress={() => { setBossMatchType('1xBoss'); setMode('bossConfig'); }} testID="mxh-1xboss-btn" />
+          <Text style={styles.modeHelp}>Enfrente Kael’Zor sozinho.</Text>
 
-          <Button title="Boss Online" variant="secondary" onPress={() => setMode('bossOnline')} testID="mxh-boss-online-btn" />
-          <Text style={styles.modeHelp}>Estrutura inicial de sala para até 3 jogadores contra Boss.</Text>
+          <Button title="2xBoss" variant="secondary" onPress={() => { setBossMatchType('2xBoss'); setMode('bossConfig'); }} testID="mxh-2xboss-btn" />
+          <Text style={styles.modeHelp}>Dois jogadores online contra Kael’Zor, usando o mesmo motor do 1xBoss.</Text>
+
+          <Button title="3xBoss" variant="secondary" onPress={() => { setBossMatchType('3xBoss'); setMode('bossConfig'); }} testID="mxh-3xboss-btn" />
+          <Text style={styles.modeHelp}>Três jogadores online contra Kael’Zor, com turnos em fila.</Text>
         </View>
       </Screen>
     );
   }
 
-  if (mode === 'bossLocal' || mode === 'bossOnline') {
+  if (mode === 'bossConfig') {
+    const isSoloBoss = bossMatchType === '1xBoss';
     return (
-      <Screen testID={mode === 'bossLocal' ? 'arena-boss-local-screen' : 'arena-boss-online-screen'}>
-        <Header title={mode === 'bossLocal' ? 'Boss Local' : 'Boss Online'} onBack={handleBack} />
+      <Screen testID="arena-boss-config-screen">
+        <Header title={bossMatchType} onBack={handleBack} />
 
         <View style={styles.panel}>
-          <Text style={styles.title}>{mode === 'bossLocal' ? 'Boss Local' : 'Boss Online'}</Text>
-          <Text style={styles.subtitle}>Kael’Zor • ENE preparada</Text>
+          <Text style={styles.title}>{bossMatchType}</Text>
+          <Text style={styles.subtitle}>Kael’Zor • ENE preparada • {isSoloBoss ? 'Solo local' : 'Online sincronizado'}</Text>
         </View>
 
         <Text style={styles.label}>Dificuldade</Text>
@@ -144,15 +154,12 @@ export default function Arena() {
 
         <View style={styles.summary}>
           <Text style={styles.summaryLine}>Boss: <Text style={styles.summaryVal}>Kael’Zor</Text></Text>
+          <Text style={styles.summaryLine}>Modo: <Text style={styles.summaryVal}>{isSoloBoss ? 'solo contra Boss' : `${bossMatchType[0]} jogadores online contra Boss`}</Text></Text>
           <Text style={styles.summaryLine}>Atributos preparados: <Text style={styles.summaryVal}>HP • Atk • Def • Ag • ENE</Text></Text>
           <Text style={styles.summaryLine}>Dificuldade: <Text style={styles.summaryVal}>{DIFFICULTIES.find(item => item.id === bossDifficulty)?.label}</Text></Text>
         </View>
 
-        {mode === 'bossLocal' ? (
-          <Button title="Iniciar Boss Local" onPress={startBossLocal} testID="boss-local-start-btn" style={{ marginTop: 16 }} />
-        ) : (
-          <Button title="Abrir Sala Boss Online" onPress={() => router.push({ pathname: '/boss-online', params: { bossDifficulty } })} testID="boss-online-open-btn" style={{ marginTop: 16 }} />
-        )}
+        <Button title={isSoloBoss ? 'Iniciar 1xBoss' : `Abrir Sala ${bossMatchType}`} onPress={startBossMatch} testID={isSoloBoss ? 'boss-1x-start-btn' : 'boss-online-open-btn'} style={{ marginTop: 16 }} />
       </Screen>
     );
   }
