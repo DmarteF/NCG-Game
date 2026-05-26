@@ -238,7 +238,7 @@ function RankBadge({ rank }: { rank: CardRank | Rank }) {
 function canCTUseCard(ct: CT | undefined, card: Card) {
   if (!ct) return true;
   if (ct.rank === 'B') return ['S-R', 'E', 'D', 'C', 'B'].includes(card.rank || 'E');
-  const order: Record<CardRank, number> = { 'S-R': 0, E: 1, D: 2, C: 3, B: 4, A: 5, S: 6 };
+  const order: Record<CardRank, number> = { 'S-R': 0, E: 1, D: 2, C: 3, B: 4, A: 5, S: 6, SS: 7 };
   return order[card.rank || 'E'] <= order[ct.rank];
 }
 

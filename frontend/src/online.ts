@@ -8,7 +8,7 @@ export function wsUrl(code: string): string {
   return `${u}/api/ws/${encodeURIComponent(code)}`;
 }
 
-export async function apiCreateRoom(turnMinutes: number, options: { matchType?: MatchType; bossMode?: boolean } = {}): Promise<{ code: string; config?: any }> {
+export async function apiCreateRoom(turnMinutes: number, options: { matchType?: MatchType; bossMode?: boolean; bossDifficulty?: string } = {}): Promise<{ code: string; config?: any }> {
   const r = await fetch(`${BASE}/api/rooms`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -21,7 +21,7 @@ export async function apiCreateRoom(turnMinutes: number, options: { matchType?: 
   return r.json();
 }
 
-export async function apiCheckRoom(code: string): Promise<{ code: string; full: boolean; config: { turnMinutes: number; matchType?: MatchType; bossMode?: boolean; teamMode?: boolean; maxPlayers?: number }; participants?: TeamParticipant[] }> {
+export async function apiCheckRoom(code: string): Promise<{ code: string; full: boolean; config: { turnMinutes: number; matchType?: MatchType; bossMode?: boolean; bossDifficulty?: string; teamMode?: boolean; maxPlayers?: number }; participants?: TeamParticipant[] }> {
   const r = await fetch(`${BASE}/api/rooms/${encodeURIComponent(code)}`);
   if (r.status === 404) throw new Error('Sala não encontrada.');
   if (!r.ok) throw new Error('Erro de conexão.');
@@ -47,7 +47,7 @@ export type TeamParticipant = {
 };
 
 export type TeamWSEvent =
-  | { type: 'team_ready'; you: string; code: string; config: { turnMinutes: number; matchType: MatchType; bossMode?: boolean; maxPlayers?: number }; participants: TeamParticipant[] }
+  | { type: 'team_ready'; you: string; code: string; config: { turnMinutes: number; matchType: MatchType; bossMode?: boolean; bossDifficulty?: string; maxPlayers?: number }; participants: TeamParticipant[] }
   | { type: 'participant_joined'; participant: TeamParticipant; participants: TeamParticipant[]; config: any }
   | { type: 'participant_left'; id: string; participants: TeamParticipant[] }
   | { type: 'team_relay'; from: string; payload: any }

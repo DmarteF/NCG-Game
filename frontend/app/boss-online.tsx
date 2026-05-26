@@ -29,12 +29,12 @@ export default function BossOnlineLobby() {
   const [busy, setBusy] = useState(false);
   const [errMsg, setErrMsg] = useState('');
 
-  const goWithProfile = async (role: 'host' | 'guest' | 'spectator', roomCode: string) => {
+  const goWithProfile = async (role: 'host' | 'guest' | 'spectator', roomCode: string, roomMatchType = matchType, roomDifficulty: BossDifficulty = difficulty) => {
     const p = await Storage.getProfile();
-    if (matchType === '1xBoss') {
+    if (roomMatchType === '1xBoss') {
       router.replace({
         pathname: '/boss-intro',
-        params: { matchType: '1xBoss', turnMinutes: '0', bossDifficulty: difficulty },
+        params: { matchType: '1xBoss', turnMinutes: '0', bossDifficulty: roomDifficulty },
       });
       return;
     }
@@ -47,8 +47,8 @@ export default function BossOnlineLobby() {
         playerVillage: p?.village || '—',
         playerImage: p?.image || '',
         bossMode: '1',
-        bossDifficulty: difficulty,
-        matchType,
+        bossDifficulty: roomDifficulty,
+        matchType: roomMatchType,
         team: 'team1',
         leader: role === 'host' ? '1' : '0',
         spectator: role === 'spectator' ? '1' : '0',
@@ -60,7 +60,7 @@ export default function BossOnlineLobby() {
     setErrMsg('');
     try {
       setBusy(true);
-      const res = await apiCreateRoom(30, { matchType, bossMode: true });
+      const res = await apiCreateRoom(30, { matchType, bossMode: true, bossDifficulty: difficulty });
       setBusy(false);
       await goWithProfile('host', res.code);
     } catch (e: any) {
@@ -79,8 +79,26 @@ export default function BossOnlineLobby() {
       setBusy(true);
       const info = await apiCheckRoom(c);
       setBusy(false);
-      if (info.full) return goWithProfile('spectator', c);
-      await goWithProfile('guest', c);
+      const roomMatch = (info.config?.matchType || matchType) as MatchType;
+      const roomDifficulty = ((info.config?.bossDifficulty || difficulty) as BossDifficulty);
+      if (info.full) return goWithProfile('spectator', c, roomMatch, roomDifficulty);
+      await goWithProfile('guest', c, roomMatch, roomDifficulty);
+    } catch (e: any) {
+      setBusy(false);
+      const m = e?.message || 'Sala não encontrada.';
+      setErrMsg(m);
+      Alert.alert('Erro', m);
+    }
+  };
+
+  const spectateRoom = async () => {
+    const c = code.trim().toUpperCase();
+    if (c.length < 4) return Alert.alert('Atenção', 'Digite um código válido.');
+    try {
+      setBusy(true);
+      const info = await apiCheckRoom(c);
+      setBusy(false);
+      await goWithProfile('spectator', c, (info.config?.matchType || matchType) as MatchType, (info.config?.bossDifficulty || difficulty) as BossDifficulty);
     } catch (e: any) {
       setBusy(false);
       const m = e?.message || 'Sala não encontrada.';
@@ -136,7 +154,7 @@ export default function BossOnlineLobby() {
           />
           {errMsg ? <Text style={styles.errorText} testID="boss-online-error-text">{errMsg}</Text> : null}
           <Button title="Entrar como jogador" onPress={joinRoom} loading={busy} testID="boss-online-join-btn" />
-          <Button title="Entrar como espectador" variant="secondary" onPress={() => goWithProfile('spectator', code.trim().toUpperCase())} disabled={code.trim().length < 4} testID="boss-online-spectator-btn" />
+          <Button title="Entrar como espectador" variant="secondary" onPress={spectateRoom} disabled={code.trim().length < 4} testID="boss-online-spectator-btn" />
           <Pressable onPress={() => setMode('home')} testID="boss-online-back-mode-btn-2"><Text style={styles.back}>Voltar</Text></Pressable>
         </View>
       ) : null}

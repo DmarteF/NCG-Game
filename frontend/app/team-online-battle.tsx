@@ -228,7 +228,7 @@ export default function TeamOnlineBattle() {
     if (bossMode) {
       const maxRank = bossMaxRank[bossDifficulty];
       if (CARD_RANK_ORDER[ct.rank as CardRank] > CARD_RANK_ORDER[maxRank]) {
-        Alert.alert('Dificuldade inválida', `Esta dificuldade permite apenas C.T até Rank ${maxRank}.`);
+        Alert.alert('Dificuldade inválida', `Esta dificuldade permite apenas C.T até Rank ${maxRank}. Rank SS é exclusivo do Boss.`);
         if (myCT?.id === ct.id) setMyCT(null);
         return;
       }
@@ -262,7 +262,7 @@ export default function TeamOnlineBattle() {
     if (bossMode) {
       const maxRank = bossMaxRank[bossDifficulty];
       const invalid = players.find(p => CARD_RANK_ORDER[(ctByPlayer[p.id]?.rank || 'E') as CardRank] > CARD_RANK_ORDER[maxRank]);
-      if (invalid) return Alert.alert('Dificuldade inválida', `${invalid.name} precisa trocar o C.T. Esta dificuldade permite apenas C.T até Rank ${maxRank}.`);
+      if (invalid) return Alert.alert('Dificuldade inválida', `${invalid.name} precisa trocar o C.T. Esta dificuldade permite apenas C.T até Rank ${maxRank}. Rank SS é exclusivo do Boss.`);
     }
     const starter = pickStarter();
     const freshBoss = createKaelzorState(bossDifficulty);
@@ -352,7 +352,7 @@ export default function TeamOnlineBattle() {
     if (bossMode) {
       const maxRank = bossMaxRank[bossDifficulty];
       const invalidCard = selectedCards.find(card => CARD_RANK_ORDER[card.rank as CardRank] > CARD_RANK_ORDER[maxRank]);
-      if (invalidCard) return Alert.alert('Dificuldade inválida', `${invalidCard.name} está acima do Rank ${maxRank}.`);
+      if (invalidCard) return Alert.alert('Dificuldade inválida', invalidCard.rank === 'SS' ? 'Rank SS é exclusivo do Boss. Jogadores podem usar no máximo Rank S.' : `${invalidCard.name} está acima do Rank ${maxRank}.`);
     }
     const resolved = resolveCombat(myCT, undefined, selectedCards, []);
     const numericAttrs = ATTRS.reduce((acc, attr) => {
@@ -525,15 +525,15 @@ export default function TeamOnlineBattle() {
     const attack = resolveBossAttack(sourceBoss, targetCT, targetCT?.attrs || emptyOnlineAttrs(), fieldAnalysis);
     const nextBoss = attack.boss;
     const bossCT = createBossCT(nextBoss);
-    const bossExtra = attack.card?.kind === 'attack'
+    const bossExtra = attack.card?.kind === 'attack' || attack.card?.kind === 'charge'
       ? `ATK base do card: ${formatNumberBR(attack.card.atk)}\nATK final: ${formatNumberBR(attack.card.atk)}\nENE restante: ${formatNumberBR(nextBoss.stats.Ene)}\nDano possível: ${formatNumberBR(attack.damagePossible)}\nAguardando resposta do jogador.`
       : `ENE restante: ${formatNumberBR(nextBoss.stats.Ene)}\nAguardando resposta do jogador.`;
     const bossCard = attack.card ? bossCardToSnapshot(attack.card, bossExtra) : undefined;
-    const targets = attack.card?.kind === 'attack'
+    const targets = attack.card?.kind === 'attack' || attack.card?.kind === 'charge'
       ? chooseBossTargets(alive, ctMap, attack.card.maxTargets || 1)
       : [];
     const nextPending = { ...pendingBossAttacksRef.current };
-    if (attack.card?.kind === 'attack' && bossCard) {
+    if ((attack.card?.kind === 'attack' || attack.card?.kind === 'charge') && bossCard && attack.damagePossible > 0) {
       const costText = Object.entries(attack.card.cost || {}).map(([attr, value]) => `${attr}: ${formatNumberBR(value)}`).join(' • ');
       targets.forEach((player) => {
         const playerDef = Number(ctMap[player.id]?.attrs.Def || 0);
@@ -690,7 +690,12 @@ export default function TeamOnlineBattle() {
         <Button title="Jogar" onPress={() => setPlayOpen(true)} disabled={!canAct()} style={{ flex: 1 }} small testID="team-play-btn" />
         <Button title="Passar" variant="ghost" onPress={sendPass} disabled={!canAct()} small testID="team-pass-btn" />
       </View>
-      <TeamPlayModal visible={playOpen} cards={cards} onClose={() => setPlayOpen(false)} onConfirm={sendPlay} />
+      <TeamPlayModal
+        visible={playOpen}
+        cards={bossMode ? cards.filter(card => CARD_RANK_ORDER[card.rank as CardRank] <= CARD_RANK_ORDER[bossMaxRank[bossDifficulty]]) : cards}
+        onClose={() => setPlayOpen(false)}
+        onConfirm={sendPlay}
+      />
       <ZoomableImageModal uri={zoomImage} onClose={() => setZoomImage(null)} />
     </Screen>
   );

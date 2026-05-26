@@ -36,7 +36,7 @@ const ctToBattleAttrs = (ct: CT): BattleAttrs => ({ ...emptyBattleAttrs(), ...ct
 const BOSS_DIFFICULTY_LABELS: Record<BossDifficulty, string> = { facil: 'Fácil', medio: 'Médio', dificil: 'Difícil', impossivel: 'Impossível' };
 const BOSS_DIFFICULTY_MAX_RANK: Record<BossDifficulty, CardRank> = { facil: 'B', medio: 'A', dificil: 'S', impossivel: 'S' };
 const rankAllowedForBossDifficulty = (difficulty: BossDifficulty, rank: Rank | CardRank) => CARD_RANK_ORDER[rank as CardRank] <= CARD_RANK_ORDER[BOSS_DIFFICULTY_MAX_RANK[difficulty]];
-const bossDifficultyWarning = (difficulty: BossDifficulty) => `Esta dificuldade permite apenas C.T até Rank ${BOSS_DIFFICULTY_MAX_RANK[difficulty]}.`;
+const bossDifficultyWarning = (difficulty: BossDifficulty) => `Esta dificuldade permite apenas C.T até Rank ${BOSS_DIFFICULTY_MAX_RANK[difficulty]}. Rank SS é exclusivo do Boss.`;
 const numericAttr = (value: number | 'ilimitado' | undefined) => typeof value === 'number' && Number.isFinite(value) ? value : 0;
 const PLAY_USE_TYPES: BattleUseType[] = SIMPLE_BATTLE_USES;
 const TARGET_SHAPES: TargetShape[] = SIMPLE_TARGET_SHAPES;
@@ -141,7 +141,7 @@ export default function Battle() {
       const maxRank = BOSS_DIFFICULTY_MAX_RANK[difficulty];
       if (!rankAllowedForBossDifficulty(difficulty, initCT1.rank)) {
         setInitCT1(null);
-        Alert.alert('Dificuldade inválida', `Esta dificuldade permite apenas C.T até Rank ${maxRank}.`);
+        Alert.alert('Dificuldade inválida', `Esta dificuldade permite apenas C.T até Rank ${maxRank}. Rank SS é exclusivo do Boss.`);
         return;
       }
       const freshBoss = createKaelzorState(difficulty);
@@ -280,13 +280,13 @@ export default function Battle() {
     const targetHitLines = applyBossTargetHits(attack);
     const nextBossCT = createBossCT(attack.boss);
     const targetHitExtra = targetHitLines.length > 0 ? `\n${targetHitLines.join('\n')}` : '';
-    const bossExtra = attack.card?.kind === 'attack'
+    const bossExtra = attack.card?.kind === 'attack' || attack.card?.kind === 'charge'
       ? `ENE restante: ${formatNumberBR(attack.boss.stats.Ene)}\nDano possível: ${formatNumberBR(attack.damagePossible)}${targetHitExtra}\nAguardando resposta do jogador.`
       : `ENE restante: ${formatNumberBR(attack.boss.stats.Ene)}\nAguardando resposta do jogador.`;
     const bossCard = attack.card
       ? bossCardToSnapshot(attack.card, bossExtra)
       : undefined;
-    if (attack.card?.kind === 'attack' && bossCard && attack.damagePossible > 0) {
+    if ((attack.card?.kind === 'attack' || attack.card?.kind === 'charge') && bossCard && attack.damagePossible > 0) {
       const costText = Object.entries(attack.card.cost || {}).map(([attr, value]) => `${attr}: ${formatNumberBR(value)}`).join(' • ');
       setPendingBossAttack({
         card: bossCard,
@@ -904,7 +904,7 @@ function RankBadge({ rank }: { rank: CardRank | Rank }) {
 function canCTUseCard(ct: CT | null, card: Card) {
   if (!ct) return true;
   if (ct.rank === 'B') return ['S-R', 'E', 'D', 'C', 'B'].includes(card.rank || 'E');
-  const order: Record<CardRank, number> = { 'S-R': 0, E: 1, D: 2, C: 3, B: 4, A: 5, S: 6 };
+  const order: Record<CardRank, number> = { 'S-R': 0, E: 1, D: 2, C: 3, B: 4, A: 5, S: 6, SS: 7 };
   return order[card.rank || 'E'] <= order[ct.rank];
 }
 

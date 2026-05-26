@@ -52,6 +52,33 @@ const numeric = (value: unknown) => {
   const n = Number(value || 0);
   return Number.isFinite(n) ? n : 0;
 };
+const DIFFICULTY_ORDER = { facil: 1, medio: 2, dificil: 3, impossivel: 4 } as const;
+const BOSS_RANK_ORDER = { B: 1, A: 2, S: 3, SS: 4 } as const;
+const modeIdsByRank = {
+  A: 'primeiro-veu-abismo-boss',
+  S: 'coroa-eclipse-rubro-boss',
+  SS: 'trono-vazio-absoluto-boss',
+} as const;
+
+function difficultyAllows(card: BossCard, boss: BossState) {
+  const min = card.minDifficulty || 'facil';
+  return DIFFICULTY_ORDER[boss.difficulty] >= DIFFICULTY_ORDER[min];
+}
+
+function unlockedRankLimit(boss: BossState) {
+  if ((boss.activeCardIds || []).includes(modeIdsByRank.SS)) return 'SS';
+  if ((boss.activeCardIds || []).includes(modeIdsByRank.S)) return 'S';
+  if ((boss.activeCardIds || []).includes(modeIdsByRank.A)) return 'A';
+  return 'B';
+}
+
+function rankUnlocked(card: BossCard, boss: BossState) {
+  return BOSS_RANK_ORDER[card.rank] <= BOSS_RANK_ORDER[unlockedRankLimit(boss)];
+}
+
+function bossCanUseCard(card: BossCard, boss: BossState) {
+  return difficultyAllows(card, boss) && rankUnlocked(card, boss) && canPay(card, boss);
+}
 
 function maxDeclaredNumber(text: string, nearWords: string[]) {
   const matches = [...text.matchAll(/(\d{1,6})\s*([a-zçãõéíóúâêô]+)?/gi)];
@@ -170,6 +197,8 @@ export function analyzePlayerAction(
 }
 
 function canPay(card: BossCard, boss: BossState) {
+  if (card.unique && (boss.usedCardIds || []).includes(card.id)) return false;
+  if (card.kind === 'mode' && (boss.activeCardIds || []).includes(card.id)) return false;
   const ene = card.cost?.ENE || 0;
   const ag = card.cost?.Ag || 0;
   return boss.stats.Ene >= ene && boss.stats.Ag >= ag && (boss.cooldowns[card.id] || 0) <= 0;
@@ -179,15 +208,20 @@ function pay(card: BossCard, boss: BossState): BossState {
   const cooldowns = Object.fromEntries(Object.entries(boss.cooldowns).map(([id, value]) => [id, Math.max(0, value - 1)]));
   const activates = ['mode', 'equipment', 'perception'].includes(card.kind);
   const currentActive = boss.activeCardIds || [];
+  const alreadyActive = currentActive.includes(card.id);
   const activeCardIds = activates ? Array.from(new Set([...currentActive, card.id])) : currentActive;
+  const boost = activates && !alreadyActive ? card.boost || {} : {};
   return {
     ...boss,
     stats: {
       ...boss.stats,
-      Ene: Math.max(0, boss.stats.Ene - numeric(card.cost?.ENE)),
-      Ag: Math.max(0, boss.stats.Ag - numeric(card.cost?.Ag)),
+      Atk: boss.stats.Atk + numeric(boost.Atk),
+      Def: boss.stats.Def + numeric(boost.Def),
+      Ag: Math.max(0, boss.stats.Ag + numeric(boost.Ag) - numeric(card.cost?.Ag)),
+      Ene: Math.max(0, boss.stats.Ene + numeric(boost.ENE) - numeric(card.cost?.ENE)),
     },
     activeCardIds,
+    usedCardIds: Array.from(new Set([...(boss.usedCardIds || []), card.id])),
     cooldowns: card.cooldownTurns ? { ...cooldowns, [card.id]: card.cooldownTurns } : cooldowns,
   };
 }
@@ -195,14 +229,26 @@ function pay(card: BossCard, boss: BossState): BossState {
 function chooseDefense(analysis: PlayerActionAnalysis, boss: BossState) {
   if (!analysis.isAttack && !analysis.isGenjutsu && !analysis.isSealing) return undefined;
   const speed = analysis.maxSpeed === 'instant' ? 99 : analysis.maxSpeed || 0;
-  if (speed > 5) return undefined;
+  if (speed > 5 && unlockedRankLimit(boss) !== 'SS') return undefined;
   const candidates: BossCard[] = [];
   const add = (id: string) => {
     const card = bossCard(id);
     const cardSpeed = card?.speed === 'instant' ? 99 : card?.speed ?? 0;
-    if (card && speed <= cardSpeed) candidates.push(card);
+    if (card && speed <= cardSpeed && bossCanUseCard(card, boss)) candidates.push(card);
   };
+  if (analysis.isInstant || analysis.attackPower > 1800000 || analysis.directHpThreat) add('autoridade-vazio-absoluto-boss');
+  if (analysis.isInstant || analysis.attackPower > 1400000) add('eclipse-existencia-boss');
+  if (analysis.isInstant || analysis.hybridEvasion) add('passo-vazio-absoluto-boss');
+  if (analysis.isInstant || speed >= 5) add('olhos-singularidade-boss');
   if (analysis.isGenjutsu) add('mente-vazia-boss');
+  if (analysis.isArea) add('mandato-coroa-rubra-boss');
+  if (!analysis.isArea) add('pele-eclipse-boss');
+  if (analysis.attackPower > 700000) add('retorno-eclipse-boss');
+  if (analysis.directHpThreat) add('passagem-eclipse-boss');
+  if (analysis.isArea) add('circulo-veu-partido-boss');
+  if (!analysis.isArea) add('muralha-primeiro-veu-boss');
+  if (!analysis.isArea) add('casca-abissal-boss');
+  if (analysis.directHpThreat) add('fuga-veu-dimensional-boss');
   add('olhos-vazio-rachado-boss');
   if (analysis.directHpThreat) add('deslocamento-vazio-rachado-boss');
   if (analysis.directHpThreat) add('reflexo-abissal-boss');
@@ -257,8 +303,15 @@ export function resolveBossDefense(
 
   const rawDamage = Math.max(0, analysis.attackPower - defenseValue);
   const damageTaken = analysis.isGenjutsu && defense?.id === 'mente-vazia-boss' ? 0 : rawDamage;
+  const pendingInterrupted = !!boss.pendingTechniqueId && (
+    analysis.isSealing
+    || analysis.directHpThreat
+    || damageTaken >= 750000
+    || keyword(analysis.text, ['interrompo', 'interromper', 'quebra de concentração', 'quebro a concentração', 'bloqueio dimensional', 'selamento dimensional'])
+  );
   nextBoss = {
     ...nextBoss,
+    pendingTechniqueId: pendingInterrupted ? undefined : nextBoss.pendingTechniqueId,
     stats: { ...nextBoss.stats, Hp: Math.max(0, nextBoss.stats.Hp - damageTaken) },
     bossMemory: {
       lastPlayerCards: playedCards.map(item => item.cardSnapshot.name).slice(-5),
@@ -270,6 +323,10 @@ export function resolveBossDefense(
     },
   };
   if (bossDebug) lines.push(`Atk final analisado: ${formatNumberBR(analysis.attackPower)}.`);
+  if (pendingInterrupted) {
+    const pendingName = boss.pendingTechniqueId ? bossCard(boss.pendingTechniqueId)?.name || 'técnica carregada' : 'técnica carregada';
+    lines.push(`${pendingName} foi interrompida antes da explosão.`);
+  }
   lines.push(`Dano recebido: ${formatNumberBR(damageTaken)}.`);
   lines.push(`HP restante do Boss: ${formatNumberBR(nextBoss.stats.Hp)}.`);
   if (analysis.declaredKill && nextBoss.stats.Hp > 0) {
@@ -282,19 +339,35 @@ function cardCost(card: BossCard) {
   return numeric(card.cost?.ENE) + numeric(card.cost?.Ag);
 }
 
+function mandatoryModeForTurn(boss: BossState) {
+  const active = boss.activeCardIds || [];
+  if (boss.difficulty !== 'facil' && boss.turn >= 2 && !active.includes(modeIdsByRank.A)) return bossCard(modeIdsByRank.A);
+  if ((boss.difficulty === 'dificil' || boss.difficulty === 'impossivel') && boss.turn >= 3 && !active.includes(modeIdsByRank.S)) return bossCard(modeIdsByRank.S);
+  if (boss.difficulty === 'impossivel' && boss.turn >= 4 && !active.includes(modeIdsByRank.SS)) return bossCard(modeIdsByRank.SS);
+  return undefined;
+}
+
 function chooseBossAction(boss: BossState, analysis?: PlayerActionAnalysis) {
+  if (boss.pendingTechniqueId) {
+    const pending = bossCard(boss.pendingTechniqueId);
+    if (pending) return pending;
+  }
+  const mandatoryMode = mandatoryModeForTurn(boss);
+  if (mandatoryMode && canPay(mandatoryMode, boss)) return mandatoryMode;
+
   const targets = Math.max(1, analysis?.cloneCount || analysis?.declaredTargets || 1);
   const hpRatio = boss.stats.Hp / 500000;
   const memory = boss.bossMemory;
   const speed = analysis?.maxSpeed === 'instant' ? 99 : analysis?.maxSpeed || 0;
-  const available = KAELZOR_BOSS_CARDS.filter(card => canPay(card, boss));
+  const available = KAELZOR_BOSS_CARDS.filter(card => bossCanUseCard(card, boss));
   if (available.length === 0) return undefined;
 
   const scored = available.map((card) => {
     let score = 0;
     if (card.id === boss.lastAttackId) score -= 80;
-    if (card.kind === 'attack') {
+    if (card.kind === 'attack' || card.kind === 'charge') {
       score += 25;
+      if (boss.difficulty === 'impossivel') score += card.rank === 'SS' ? 18 : 8;
       if (targets <= 1 && (card.maxTargets || 1) <= 3) score += card.id === 'corte-vazio-boss' ? 18 : 14;
       if (targets > 1 && (card.maxTargets || 1) >= Math.min(targets, 3)) score += 18;
       if (targets > 3 && (card.maxTargets || 1) >= 20) score += 36;
@@ -306,6 +379,13 @@ function chooseBossAction(boss: BossState, analysis?: PlayerActionAnalysis) {
       if (boss.turn >= 2 && (card.speed === 'instant' || Number(card.speed || 0) >= Number(analysis?.maxSpeed || 0))) score += 10;
       if ((memory?.threatScore || 0) > 10) score += 10;
       if (boss.stats.Ene < 250000) score -= Math.floor(cardCost(card) / 20000);
+      if (card.id === 'big-bang-eclipse-rubro-boss') {
+        score += targets > 2 || (memory?.threatScore || 0) > 18 ? 34 : -8;
+        if (boss.turn < 5) score -= 20;
+      }
+      if (card.id === 'colapso-realidade-boss') score += targets > 2 || analysis?.far || analysis?.flying ? 28 : 8;
+      if (card.id === 'mare-abismo-rubro-boss' && boss.lastAttackId === 'decreto-eclipse-boss') score -= 100;
+      if (card.id === 'decreto-eclipse-boss' && boss.turn <= 3) score -= 80;
     }
     if (card.kind === 'movement') {
       score += 8;
@@ -349,7 +429,27 @@ function dynamicBossLegend(action: BossCard, analysis?: PlayerActionAnalysis) {
   const turnSeed = (analysis?.declaredTargets || 0) + (analysis?.cloneCount || 0) + action.id.length;
   const pick = (items: string[]) => items[turnSeed % items.length];
   let speech: string;
-  if (action.kind === 'movement') speech = pick([
+  if (action.id === 'primeiro-veu-abismo-boss') speech = 'O primeiro véu se rompe... e sua esperança começa a falhar.';
+  else if (action.id === 'coroa-eclipse-rubro-boss') speech = 'A Coroa desperta. A partir daqui, sua sobrevivência será permissão minha.';
+  else if (action.id === 'trono-vazio-absoluto-boss') speech = 'O Trono se ergue. Agora o campo pertence ao Vazio.';
+  else if (action.rank === 'SS' && clones) speech = 'Vou apagar suas cópias, seus aliados e depois o que restar de você.';
+  else if (action.rank === 'SS' && action.kind === 'defense') speech = 'Cada defesa sua apenas atrasa o inevitável.';
+  else if (action.rank === 'SS') speech = pick([
+    'Não lute para vencer. Lute para ser lembrado.',
+    'O espaço obedece. Você apenas cai.',
+    'Cada defesa sua apenas atrasa o inevitável.',
+  ]);
+  else if (action.rank === 'S' && action.kind === 'defense') speech = 'Seu ataque foi notado, julgado e condenado.';
+  else if (action.rank === 'S') speech = pick([
+    'O eclipse não ilumina... ele apaga.',
+    'A Coroa desperta. A partir daqui, sua sobrevivência será permissão minha.',
+  ]);
+  else if (action.rank === 'A' && clones) speech = 'Essas cópias não vão atrasar meu retorno.';
+  else if (action.rank === 'A') speech = pick([
+    'Você já sente o Abismo tocando seu chakra?',
+    'O primeiro véu se rompe... e sua esperança começa a falhar.',
+  ]);
+  else if (action.kind === 'movement') speech = pick([
     'Você mira uma sombra que já deixou de existir.',
     'O espaço se rompe... e eu já não estou onde você ataca.',
     'Tarde demais. O vazio se move antes da sua intenção.',
@@ -397,18 +497,27 @@ export function resolveBossAttack(
     lines.push('Aguardando resposta do jogador.');
     return { boss: { ...boss, turn: boss.turn + 1 }, playerAttrs, damagePossible: 0, defeatedPlayer: false, lines };
   }
+  const resolvingPending = !!boss.pendingTechniqueId && boss.pendingTechniqueId === action.id;
+  const startingCharge = action.kind === 'charge' && !resolvingPending;
   const targets = Math.max(1, analysis?.cloneCount || analysis?.declaredTargets || 1);
   const hitTargets = Math.min(targets, action.maxTargets || 1);
-  let nextBoss = pay(action, { ...boss, lastAttackId: action.id });
+  let nextBoss = resolvingPending
+    ? { ...boss, pendingTechniqueId: undefined, lastAttackId: action.id }
+    : pay(action, { ...boss, lastAttackId: action.id });
+  if (startingCharge) nextBoss = { ...nextBoss, pendingTechniqueId: action.id };
   nextBoss = { ...nextBoss, turn: boss.turn + 1 };
 
   const playerDef = numeric(playerAttrs.Def);
-  const damage = action.kind === 'attack' ? Math.max(0, numeric(action.atk) - playerDef) : 0;
+  const damage = action.kind === 'attack' || resolvingPending ? Math.max(0, numeric(action.atk) - playerDef) : 0;
   const nextPlayerAttrs = { ...playerAttrs };
 
   lines.push(dynamicBossLegend(action, analysis));
-  if (action.kind === 'attack') {
+  if (startingCharge) {
+    lines.push(`${action.name} está carregando. A estrela dimensional ainda não explodiu.`);
+    lines.push('Jogadores podem responder antes da explosão: fugir da área, levantar defesa coletiva, interromper canalização, selar, aprisionar ou bloquear o espaço.');
+  } else if (action.kind === 'attack' || resolvingPending) {
     lines.push(`Atk: ${formatNumberBR(action.atk)}. ${formatSpeed(action.speed) || 'Sem Speed'}.`);
+    if (resolvingPending) lines.push('A técnica carregada explode agora; ainda é resolvida por defesa, movimento, interrupção anterior ou escape válido.');
     if (targets > 1) {
       lines.push(`Resultado: ${hitTargets} alvo(s) atingido(s)${hitTargets < targets ? `; ${targets - hitTargets} permanecem fora do alcance.` : '.'}`);
     }
@@ -417,7 +526,7 @@ export function resolveBossAttack(
   } else if (action.kind === 'movement') {
     lines.push(`Resultado: ${action.movementType || 'reposicionamento'} (${action.movementRange || 'alcance indefinido'}).`);
   } else if (action.kind === 'mode') {
-    lines.push('Resultado: modo ativo no Boss.');
+    lines.push('Resultado: modo ativo no Boss. Bônus somado uma única vez e ranks superiores liberados conforme a dificuldade.');
   } else if (action.kind === 'equipment') {
     lines.push('Resultado: equipamento ativo no Boss.');
   } else if (action.kind === 'defense' || action.kind === 'mental' || action.kind === 'perception') {
