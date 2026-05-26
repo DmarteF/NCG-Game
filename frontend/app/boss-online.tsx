@@ -89,8 +89,8 @@ export default function BossOnlineLobby() {
       <View style={styles.banner}>
         <Ionicons name="skull-outline" size={20} color={theme.colors.neon} />
         <View style={{ flex: 1 }}>
-          <Text style={styles.bannerText}>MxH Online — estrutura inicial</Text>
-          <Text style={styles.bannerSub}>Kael’Zor • {labels[difficulty]} • HP/Atk/Def/Ag/ENE preparados</Text>
+          <Text style={styles.bannerText}>MxH Online — Boss sincronizado</Text>
+          <Text style={styles.bannerSub}>Kael’Zor • {labels[difficulty]} • cards reais, ENE e turnos em rede</Text>
         </View>
       </View>
 
@@ -98,7 +98,7 @@ export default function BossOnlineLobby() {
         <View style={{ gap: 14, marginTop: 8 }}>
           <Button title="Criar Sala Boss" onPress={() => setMode('create')} testID="boss-online-create-mode-btn" />
           <Button title="Entrar em Sala Boss" variant="secondary" onPress={() => setMode('join')} testID="boss-online-join-mode-btn" />
-          <Text style={styles.hint}>Usa o relay/WebSocket existente. O Boss fica manual por enquanto, sem IA avançada.</Text>
+          <Text style={styles.hint}>O líder gera a ação do Boss uma vez e a sala inteira recebe o mesmo card, cálculo e turno.</Text>
         </View>
       ) : null}
 

@@ -13,6 +13,9 @@ import { Storage, uid } from '../src/storage';
 import { ATTRS, Attr, CARD_RANK_ORDER, CardRank, theme } from '../src/theme';
 import { BossDifficulty, Card, CT, MatchType, PlayedCard } from '../src/types';
 import { Header } from './profile';
+import { BossState, bossCardToSnapshot, createBossCT, createKaelzorState } from '../src/bossData';
+import { resolveBossAttack, resolveBossDefense } from '../src/bossRules';
+import { calculationDetailsFor } from '../src/historyExport';
 
 type Team = 'team1' | 'team2';
 type TeamMsg = {
@@ -24,10 +27,25 @@ type TeamMsg = {
   playedCards?: PlayedCard[];
   ctSnapshot?: CT;
   finalAttrs?: Record<Attr, number | 'ilimitado'>;
+  calculationDetails?: string[];
   timestamp: number;
+};
+type PendingOnlineBossAttack = {
+  card: Card;
+  damagePossible: number;
+  speed?: Card['speed'];
+  targets: number;
+  costText: string;
+  turn: number;
+  targetPlayerId: string;
 };
 
 const TEAM_MATCHES: MatchType[] = ['1x2', '2x2', '2x3', '3x3'];
+const emptyOnlineAttrs = (): Record<Attr, number> => ({ Atk: 0, Def: 0, Dur: 0, Ag: 0, Ck: 0, Hp: 0 });
+const ctToOnlineAttrs = (ct: CT): Record<Attr, number> => ({ ...emptyOnlineAttrs(), ...ct.attrs, Dur: 0 });
+const allBossPlayersDefeated = (ctMap: Record<string, CT>, participants: TeamParticipant[]) => participants
+  .filter(p => p.role !== 'spectator' && p.team === 'team1')
+  .every(p => Number(ctMap[p.id]?.attrs.Hp || 0) <= 0);
 
 export default function TeamOnlineBattle() {
   const router = useRouter();
@@ -72,6 +90,9 @@ export default function TeamOnlineBattle() {
   const [currentTeam, setCurrentTeam] = useState<Team | 'boss'>('team1');
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const [turn, setTurn] = useState(1);
+  const [ended, setEnded] = useState(false);
+  const [bossState, setBossState] = useState<BossState>(() => createKaelzorState(bossDifficulty));
+  const [pendingBossAttacks, setPendingBossAttacks] = useState<Record<string, PendingOnlineBossAttack>>({});
   const [messages, setMessages] = useState<TeamMsg[]>([]);
   const [chatText, setChatText] = useState('');
   const [playOpen, setPlayOpen] = useState(false);
@@ -120,24 +141,40 @@ export default function TeamOnlineBattle() {
         setCtByPlayer((map) => ({ ...map, [payload.playerId]: payload.ct }));
       } else if (payload.action === 'start_team') {
         setStarted(true);
+        setEnded(false);
         setCurrentTeam(payload.currentTeam);
         setCurrentPlayerId(payload.currentPlayerId || null);
         setTurn(payload.turn || 1);
+        if (payload.bossState) setBossState(payload.bossState);
         setMessages((items) => [...items, { id: uid(), team: 'system', turn: payload.turn || 1, text: payload.text, timestamp: Date.now() }]);
       } else if (payload.action === 'play') {
         if (payload.playerId && payload.ct) setCtByPlayer((map) => ({ ...map, [payload.playerId]: payload.ct }));
-        setMessages((items) => [...items, { id: uid(), team: payload.team, player: payload.playerName, turn: payload.turn, playedCards: payload.cards, ctSnapshot: payload.ct, finalAttrs: payload.finalAttrs, text: payload.observation, timestamp: Date.now() }]);
-        advanceAfter(payload.team, payload.playerId);
+        if (payload.bossState) setBossState(payload.bossState);
+        if (payload.pendingBossAttacks) setPendingBossAttacks(payload.pendingBossAttacks);
+        setMessages((items) => [
+          ...items,
+          { id: uid(), team: payload.team, player: payload.playerName, turn: payload.turn, playedCards: payload.cards, ctSnapshot: payload.ct, finalAttrs: payload.finalAttrs, text: payload.observation, calculationDetails: payload.calculationDetails, timestamp: Date.now() },
+          ...(payload.extraMessages || []).map((msg: TeamMsg) => ({ ...msg, id: uid(), timestamp: Date.now() })),
+        ]);
+        if (payload.endText) finishBattle(payload.endText, false);
+        else advanceAfter(payload.team, payload.playerId);
       } else if (payload.action === 'pass') {
+        if (payload.ct) setCtByPlayer((map) => ({ ...map, [payload.playerId]: payload.ct }));
+        if (payload.pendingBossAttacks) setPendingBossAttacks(payload.pendingBossAttacks);
         setMessages((items) => [...items, { id: uid(), team: 'system', turn: payload.turn, text: `${payload.playerName} passou pelo time.`, timestamp: Date.now() }]);
-        advanceAfter(payload.team, payload.playerId);
+        if (payload.extraMessages) setMessages((items) => [...items, ...payload.extraMessages.map((msg: TeamMsg) => ({ ...msg, id: uid(), timestamp: Date.now() }))]);
+        if (payload.endText) finishBattle(payload.endText, false);
+        else advanceAfter(payload.team, payload.playerId);
       } else if (payload.action === 'chat') {
         setMessages((items) => [...items, { id: uid(), team: payload.team, player: payload.playerName, turn: payload.turn || turn, text: payload.text, timestamp: payload.timestamp || Date.now() }]);
-      } else if (payload.action === 'boss_opening') {
-        setMessages((items) => [...items, { id: uid(), team: 'system', turn: payload.turn || 1, text: payload.text, timestamp: Date.now() }]);
+      } else if (payload.action === 'boss_action') {
+        if (payload.bossState) setBossState(payload.bossState);
+        if (payload.pendingBossAttacks) setPendingBossAttacks(payload.pendingBossAttacks);
+        setMessages((items) => [...items, payload.message]);
         setCurrentTeam('team1');
-        const first = nextBossPlayerAfter(null);
-        setCurrentPlayerId(first?.id || null);
+        setCurrentPlayerId(payload.nextPlayerId || null);
+      } else if (payload.action === 'battle_end') {
+        finishBattle(payload.text, false);
       }
     } else if (event.type === 'error') {
       setConnStatus('error');
@@ -182,29 +219,28 @@ export default function TeamOnlineBattle() {
       if (invalid) return Alert.alert('Dificuldade inválida', `${invalid.name} precisa trocar o C.T. Esta dificuldade permite apenas C.T até Rank ${maxRank}.`);
     }
     const starter = pickStarter();
+    const freshBoss = createKaelzorState(bossDifficulty);
     const firstPlayer = starter === 'boss' ? null : firstPlayerForTeam(starter);
     const text = starter === 'boss'
-      ? 'Kael’Zor começa. O turno do Boss online está preparado para resolução manual/assistida.'
+      ? 'Kael’Zor começa. O Fragmento do Vazio já está ativo e a ação do Boss será sincronizada pela sala.'
       : `${starter === 'team1' ? 'Time 1' : 'Time 2'} começa. AG total: Time 1 ${formatNumberBR(teamAg('team1'))} • Time 2 ${formatNumberBR(teamAg('team2'))}.`;
     setStarted(true);
+    setEnded(false);
+    setBossState(freshBoss);
+    setPendingBossAttacks({});
     setCurrentTeam(starter);
     setCurrentPlayerId(firstPlayer?.id || null);
     setMessages((items) => [...items, { id: uid(), team: 'system', turn: 1, text, timestamp: Date.now() }]);
-    relay({ action: 'start_team', currentTeam: starter, currentPlayerId: firstPlayer?.id || null, turn: 1, text });
+    relay({ action: 'start_team', currentTeam: starter, currentPlayerId: firstPlayer?.id || null, turn: 1, text, bossState: freshBoss });
     if (starter === 'boss') {
-      setTimeout(() => {
-        relay({ action: 'boss_opening', turn: 1, text: 'Boss online: Kael’Zor abre a luta. IA avançada e cartas completas serão refinadas depois; o relay/chat já está pronto.' });
-        setMessages((items) => [...items, { id: uid(), team: 'system', turn: 1, text: 'Boss online: Kael’Zor abre a luta. IA avançada e cartas completas serão refinadas depois; o relay/chat já está pronto.', timestamp: Date.now() }]);
-        const first = nextBossPlayerAfter(null);
-        setCurrentTeam('team1');
-        setCurrentPlayerId(first?.id || null);
-      }, 300);
+      setTimeout(() => runOnlineBossTurn(1, freshBoss, ctByPlayer, participants), 300);
     }
   };
 
   const canAct = () => {
     if (isSpectator) return false;
     if (!started) return false;
+    if (ended) return false;
     if (currentTeam === 'boss') return false;
     return currentTeam === myTeam && (!currentPlayerId || currentPlayerId === myId);
   };
@@ -219,7 +255,9 @@ export default function TeamOnlineBattle() {
     return true;
   };
 
-  const playersForTeam = (team: Team) => participants.filter(p => p.role !== 'spectator' && p.team === team).sort((a, b) => a.name.localeCompare(b.name));
+  const playersForTeam = (team: Team, ctMap = ctByPlayer) => participants
+    .filter(p => p.role !== 'spectator' && p.team === team && Number(ctMap[p.id]?.attrs.Hp ?? 1) > 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
   const firstPlayerForTeam = (team: Team) => playersForTeam(team)[0];
   const nextBossPlayerAfter = (playerId: string | null) => {
     const players = playersForTeam('team1');
@@ -240,11 +278,7 @@ export default function TeamOnlineBattle() {
       setCurrentPlayerId(null);
       setTurn((value) => value + 1);
       setTimeout(() => {
-        const first = nextBossPlayerAfter(null);
-        setMessages((items) => [...items, { id: uid(), team: 'system', turn: turn + 1, text: 'Boss encerrou a rodada. Próximo jogador pode agir.', timestamp: Date.now() }]);
-        relay({ action: 'boss_opening', turn: turn + 1, text: 'Boss encerrou a rodada. Próximo jogador pode agir.' });
-        setCurrentTeam('team1');
-        setCurrentPlayerId(first?.id || null);
+        if (isLeader) runOnlineBossTurn(turn + 1, bossState, ctByPlayer, participants);
       }, 300);
       return;
     }
@@ -268,6 +302,11 @@ export default function TeamOnlineBattle() {
       Alert.alert('Regra do primeiro turno', 'Ações ilimitadas, genjutsu e finalizações declaradas ficam bloqueadas/preparadas no primeiro turno online.');
       return;
     }
+    if (bossMode) {
+      const maxRank = bossMaxRank[bossDifficulty];
+      const invalidCard = selectedCards.find(card => CARD_RANK_ORDER[card.rank as CardRank] > CARD_RANK_ORDER[maxRank]);
+      if (invalidCard) return Alert.alert('Dificuldade inválida', `${invalidCard.name} está acima do Rank ${maxRank}.`);
+    }
     const resolved = resolveCombat(myCT, undefined, selectedCards, []);
     const numericAttrs = ATTRS.reduce((acc, attr) => {
       const value = resolved.finalAttrs[attr];
@@ -278,18 +317,190 @@ export default function TeamOnlineBattle() {
     setMyCT(nextCT);
     setCtByPlayer((map) => ({ ...map, [myId]: nextCT }));
     const played = await Promise.all(selectedCards.map(async card => ({ cardSnapshot: await withRemoteImageCard(card) })));
-    const msg: TeamMsg = { id: uid(), team: myTeam, player: me.name, turn, playedCards: selectedCards.map(card => ({ cardSnapshot: card })), ctSnapshot: nextCT, finalAttrs: resolved.finalAttrs, text: observation, timestamp: Date.now() };
-    setMessages((items) => [...items, msg]);
-    relay({ action: 'play', team: myTeam, playerId: myId, playerName: me.name, turn, cards: played, ct: await withRemoteImageCT(nextCT), finalAttrs: resolved.finalAttrs, observation });
+    let extraMessages: TeamMsg[] = [];
+    let nextBoss = bossState;
+    let nextPending = { ...pendingBossAttacks };
+    let finalCT = nextCT;
+    let finalAttrs = resolved.finalAttrs;
+    let endText = '';
+    if (bossMode) {
+      const pending = nextPending[myId];
+      if (pending) {
+        const pendingResult = resolveOnlinePendingBossAttack(pending, selectedCards, observation, resolved.finalAttrs);
+        finalAttrs = pendingResult.nextAttrs;
+        finalCT = { ...nextCT, attrs: ATTRS.reduce((acc, attr) => ({ ...acc, [attr]: typeof finalAttrs[attr] === 'number' ? finalAttrs[attr] as number : nextCT.attrs[attr] || 0 }), {} as Record<Attr, number>) };
+        delete nextPending[myId];
+        extraMessages.push(pendingResult.message);
+        const updatedMap = { ...ctByPlayer, [myId]: finalCT };
+        if (pendingResult.defeated && allBossPlayersDefeated(updatedMap, participants)) endText = 'Kael’Zor venceu.';
+      }
+      if (!endText) {
+        const bossDefense = resolveBossDefense(nextBoss, selectedCards.map(card => ({ cardSnapshot: card })), observation, finalAttrs, resolved.momentaryActions);
+        nextBoss = bossDefense.boss;
+        const bossCT = createBossCT(nextBoss);
+        const defenseExtra = `ENE restante: ${formatNumberBR(nextBoss.stats.Ene)}\nDano recebido: ${formatNumberBR(bossDefense.damageTaken)}\nHP restante do Boss: ${formatNumberBR(nextBoss.stats.Hp)}`;
+        const defenseCard = bossDefense.card ? bossCardToSnapshot(bossDefense.card, defenseExtra) : undefined;
+        const defenseMsg: TeamMsg = {
+          id: uid(),
+          team: defenseCard ? 'team2' : 'system',
+          turn,
+          text: bossDefense.lines.join('\n'),
+          playedCards: defenseCard ? [{ cardSnapshot: defenseCard }] : undefined,
+          ctSnapshot: defenseCard ? bossCT : undefined,
+          finalAttrs: defenseCard ? ctToOnlineAttrs(bossCT) : undefined,
+          calculationDetails: defenseCard ? calculationDetailsFor({ playedCards: [{ cardSnapshot: defenseCard }], ctSnapshot: bossCT, finalAttrs: ctToOnlineAttrs(bossCT) }) : undefined,
+          timestamp: Date.now(),
+        };
+        extraMessages.push(defenseMsg);
+        if (bossDefense.defeated) endText = 'Kael’Zor foi derrotado. Os jogadores venceram.';
+      }
+      setBossState(nextBoss);
+      setPendingBossAttacks(nextPending);
+    }
+    setMyCT(finalCT);
+    setCtByPlayer((map) => ({ ...map, [myId]: finalCT }));
+    const msg: TeamMsg = { id: uid(), team: myTeam, player: me.name, turn, playedCards: selectedCards.map(card => ({ cardSnapshot: card })), ctSnapshot: finalCT, finalAttrs, text: observation, timestamp: Date.now() };
+    setMessages((items) => [...items, msg, ...extraMessages]);
+    relay({ action: 'play', team: myTeam, playerId: myId, playerName: me.name, turn, cards: played, ct: await withRemoteImageCT(finalCT), finalAttrs, observation, extraMessages, bossState: nextBoss, pendingBossAttacks: nextPending, endText });
     setPlayOpen(false);
-    advanceAfter(myTeam, myId);
+    if (endText) finishBattle(endText);
+    else advanceAfter(myTeam, myId);
   };
 
-  const sendPass = () => {
+  const sendPass = async () => {
     if (!canAct() || !enforceCooldown()) return;
-    setMessages((items) => [...items, { id: uid(), team: 'system', turn, text: `${me.name} passou pelo time.`, timestamp: Date.now() }]);
-    relay({ action: 'pass', team: myTeam, playerId: myId, playerName: me.name, turn });
-    advanceAfter(myTeam, myId);
+    let nextPending = { ...pendingBossAttacks };
+    let nextCT = myCT;
+    let extraMessages: TeamMsg[] = [];
+    let endText = '';
+    const pending = bossMode ? nextPending[myId] : undefined;
+    if (pending && myCT) {
+      const pendingResult = resolveOnlinePendingBossAttack(pending, [], 'Jogador passou o turno.', myCT.attrs);
+      nextCT = { ...myCT, attrs: ATTRS.reduce((acc, attr) => ({ ...acc, [attr]: typeof pendingResult.nextAttrs[attr] === 'number' ? pendingResult.nextAttrs[attr] as number : myCT.attrs[attr] || 0 }), {} as Record<Attr, number>) };
+      delete nextPending[myId];
+      extraMessages.push(pendingResult.message);
+      setMyCT(nextCT);
+      setCtByPlayer((map) => ({ ...map, [myId]: nextCT! }));
+      setPendingBossAttacks(nextPending);
+      const updatedMap = { ...ctByPlayer, [myId]: nextCT };
+      if (pendingResult.defeated && allBossPlayersDefeated(updatedMap, participants)) endText = 'Kael’Zor venceu.';
+    }
+    setMessages((items) => [...items, { id: uid(), team: 'system', turn, text: `${me.name} passou pelo time.`, timestamp: Date.now() }, ...extraMessages]);
+    relay({ action: 'pass', team: myTeam, playerId: myId, playerName: me.name, turn, ct: nextCT ? await withRemoteImageCT(nextCT) : undefined, pendingBossAttacks: nextPending, extraMessages, endText });
+    if (endText) finishBattle(endText);
+    else advanceAfter(myTeam, myId);
+  };
+
+  const finishBattle = (text: string, broadcast = true) => {
+    setEnded(true);
+    setStarted(true);
+    setCurrentTeam('team1');
+    setCurrentPlayerId(null);
+    setMessages((items) => items.some(item => item.text === text) ? items : [...items, { id: uid(), team: 'system', turn, text, timestamp: Date.now() }]);
+    if (broadcast) relay({ action: 'battle_end', text });
+  };
+
+  const runOnlineBossTurn = async (bossTurn: number, sourceBoss: BossState, ctMap: Record<string, CT>, roomParticipants: TeamParticipant[]) => {
+    if (!bossMode || !isLeader || ended) return;
+    const alive = roomParticipants
+      .filter(p => p.role !== 'spectator' && p.team === 'team1' && Number(ctMap[p.id]?.attrs.Hp ?? 1) > 0)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    if (alive.length === 0) {
+      finishBattle('Kael’Zor venceu.');
+      return;
+    }
+    const target = alive[0];
+    const targetCT = ctMap[target.id];
+    const attack = resolveBossAttack(sourceBoss, targetCT, targetCT?.attrs || emptyOnlineAttrs());
+    const nextBoss = attack.boss;
+    const bossCT = createBossCT(nextBoss);
+    const bossExtra = attack.card?.kind === 'attack'
+      ? `ATK base do card: ${formatNumberBR(attack.card.atk)}\nATK final: ${formatNumberBR(attack.card.atk)}\nENE restante: ${formatNumberBR(nextBoss.stats.Ene)}\nDano possível: ${formatNumberBR(attack.damagePossible)}\nAguardando resposta do jogador.`
+      : `ENE restante: ${formatNumberBR(nextBoss.stats.Ene)}\nAguardando resposta do jogador.`;
+    const bossCard = attack.card ? bossCardToSnapshot(attack.card, bossExtra) : undefined;
+    const targets = attack.card?.kind === 'attack'
+      ? alive.slice(0, Math.min(alive.length, attack.card.maxTargets || 1))
+      : [];
+    const nextPending = { ...pendingBossAttacks };
+    if (attack.card?.kind === 'attack' && bossCard && attack.damagePossible > 0) {
+      const costText = Object.entries(attack.card.cost || {}).map(([attr, value]) => `${attr}: ${formatNumberBR(value)}`).join(' • ');
+      targets.forEach((player) => {
+        nextPending[player.id] = {
+          card: bossCard,
+          damagePossible: attack.damagePossible,
+          speed: attack.card?.speed,
+          targets: attack.card?.maxTargets || 1,
+          costText,
+          turn: bossTurn,
+          targetPlayerId: player.id,
+        };
+      });
+    }
+    const msg: TeamMsg = {
+      id: uid(),
+      team: 'team2',
+      turn: bossTurn,
+      text: attack.lines.join('\n'),
+      playedCards: bossCard ? [{ cardSnapshot: await withRemoteImageCard(bossCard) }] : undefined,
+      ctSnapshot: await withRemoteImageCT(bossCT),
+      finalAttrs: ctToOnlineAttrs(bossCT),
+      timestamp: Date.now(),
+    };
+    msg.calculationDetails = calculationDetailsFor({ playedCards: bossCard ? [{ cardSnapshot: bossCard }] : undefined, ctSnapshot: bossCT, finalAttrs: msg.finalAttrs });
+    setBossState(nextBoss);
+    setPendingBossAttacks(nextPending);
+    setMessages((items) => [...items, msg]);
+    setCurrentTeam('team1');
+    setCurrentPlayerId(alive[0]?.id || null);
+    relay({ action: 'boss_action', turn: bossTurn, bossState: nextBoss, pendingBossAttacks: nextPending, message: msg, nextPlayerId: alive[0]?.id || null });
+  };
+
+  const resolveOnlinePendingBossAttack = (
+    pending: PendingOnlineBossAttack,
+    selectedCards: Card[],
+    observation: string,
+    proposedAttrs: Record<Attr, number | 'ilimitado'>,
+  ) => {
+    const lower = `${observation} ${selectedCards.map(card => `${card.name} ${card.caption}`).join(' ')}`.toLowerCase();
+    const hasDefense = selectedCards.some(card => card.countsAsDefense || card.actionType === 'defense' || card.battleUseType?.includes('defesa'));
+    const movementCards = selectedCards.filter(card => card.countsAsMovement || card.actionType === 'movement' || card.battleUseType?.includes('movimentação') || card.battleUseType?.includes('esquiva'));
+    const hasSupport = selectedCards.some(card => card.actionType === 'perception' || card.cardType === 'percepção/rastreamento/reação');
+    const hasSummonCover = selectedCards.some(card => ['invocação', 'marionete', 'edo tensei', 'invocação diversa'].includes(card.cardType || ''));
+    const hasDefenseText = ['defesa', 'defendo', 'bloqueio', 'barreira', 'escudo', 'esquiva', 'desvio', 'clone', 'invocação', 'invocacao', 'marionete', 'edo'].some(word => lower.includes(word));
+    const defValue = selectedCards.reduce((sum, card) => sum + Number(card.boost?.Def || 0) + Number(card.momentaryAttrs?.Def || 0), 0);
+    const pendingSpeed = pending.speed === 'instant' ? 99 : Number(pending.speed || 0);
+    const bestMoveSpeed = movementCards.reduce((best, card) => Math.max(best, card.speed === 'instant' ? 99 : Number(card.speed || 0)), 0);
+    const movementDefense = movementCards.length > 0 ? (bestMoveSpeed >= pendingSpeed ? pending.damagePossible : Math.floor(pending.damagePossible / 2)) : 0;
+    const coverDefense = hasSummonCover ? pending.damagePossible : 0;
+    const defenseValue = Math.max(defValue, movementDefense, coverDefense);
+    const validDefense = hasDefense || movementCards.length > 0 || hasSummonCover || (hasSupport && (hasDefenseText || hasDefense)) || (hasDefenseText && defenseValue > 0);
+    const damage = validDefense ? Math.max(0, pending.damagePossible - defenseValue) : pending.damagePossible;
+    const nextAttrs = { ...proposedAttrs };
+    nextAttrs.Hp = Math.max(0, Number(nextAttrs.Hp || 0) - damage);
+    const hp = Number(nextAttrs.Hp || 0);
+    const lines = [
+      validDefense ? `Jogador respondeu ao ataque ${pending.card.name}.` : `Jogador não apresentou defesa válida contra ${pending.card.name}.`,
+      validDefense ? `Defesa/mitigação: ${formatNumberBR(defenseValue)}.` : '',
+      `Dano final: ${formatNumberBR(damage)}.`,
+      `HP restante: ${formatNumberBR(hp)}.`,
+    ].filter(Boolean);
+    const message: TeamMsg = {
+      id: uid(),
+      team: 'system',
+      turn,
+      text: lines.join('\n'),
+      finalAttrs: nextAttrs,
+      calculationDetails: [
+        `Ataque pendente: ${pending.card.name}.`,
+        `Dano possível: ${formatNumberBR(pending.damagePossible)}.`,
+        `Speed: ${formatSpeed(pending.speed) || 'Sem Speed'}.`,
+        `Custo do Boss: ${pending.costText || 'sem custo'}.`,
+        `Defesa válida: ${validDefense ? 'sim' : 'não'}.`,
+        `Dano final: ${formatNumberBR(damage)}.`,
+      ],
+      timestamp: Date.now(),
+    };
+    return { message, nextAttrs, defeated: hp <= 0 };
   };
 
   const sendChat = () => {
