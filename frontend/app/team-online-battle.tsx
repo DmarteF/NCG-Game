@@ -149,6 +149,7 @@ export default function TeamOnlineBattle() {
       setMessages((items) => [...items, { id: uid(), team: 'system', turn, text: 'Um jogador saiu da sala.', timestamp: Date.now() }]);
     } else if (event.type === 'team_relay') {
       const payload = event.payload || {};
+      if (payload.sourceId === myId) return;
       if (payload.action === 'initial_ct') {
         setCtByPlayer((map) => {
           const next = { ...map, [payload.playerId]: payload.ct };
@@ -239,7 +240,7 @@ export default function TeamOnlineBattle() {
       ctByPlayerRef.current = next;
       return next;
     });
-    relay({ action: 'initial_ct', playerId: myId, ct: await withRemoteImageCT(ct) });
+    relay({ action: 'initial_ct', sourceId: myId, playerId: myId, ct: await withRemoteImageCT(ct) });
   };
 
   const teamAg = (team: Team) => participants.filter(p => p.role !== 'spectator' && p.team === team).reduce((sum, p) => sum + Number(ctByPlayer[p.id]?.attrs.Ag || 0), 0);
@@ -279,7 +280,7 @@ export default function TeamOnlineBattle() {
     setCurrentTeam(starter);
     setCurrentPlayerId(firstPlayer?.id || null);
     setMessages((items) => [...items, { id: uid(), team: 'system', turn: 1, text, timestamp: Date.now() }]);
-    relay({ action: 'start_team', currentTeam: starter, currentPlayerId: firstPlayer?.id || null, turn: 1, text, bossState: freshBoss });
+    relay({ action: 'start_team', sourceId: myId, currentTeam: starter, currentPlayerId: firstPlayer?.id || null, turn: 1, text, bossState: freshBoss });
     if (starter === 'boss') {
       setTimeout(() => runOnlineBossTurn(1, freshBoss, ctByPlayerRef.current, participantsRef.current), 300);
     }
@@ -419,7 +420,7 @@ export default function TeamOnlineBattle() {
     const msg: TeamMsg = { id: uid(), team: myTeam, player: me.name, turn, playedCards: selectedCards.map(card => ({ cardSnapshot: card })), ctSnapshot: finalCT, finalAttrs, text: observation, timestamp: Date.now() };
     msg.calculationDetails = calculationDetailsFor(msg);
     setMessages((items) => [...items, msg, ...extraMessages]);
-    relay({ action: 'play', team: myTeam, playerId: myId, playerName: me.name, turn, cards: played, ct: await withRemoteImageCT(finalCT), finalAttrs, observation, calculationDetails: msg.calculationDetails, extraMessages, bossState: nextBoss, pendingBossAttacks: nextPending, endText });
+    relay({ action: 'play', sourceId: myId, team: myTeam, playerId: myId, playerName: me.name, turn, cards: played, ct: await withRemoteImageCT(finalCT), finalAttrs, observation, calculationDetails: msg.calculationDetails, extraMessages, bossState: nextBoss, pendingBossAttacks: nextPending, endText });
     setPlayOpen(false);
     if (endText) finishBattle(endText);
     else advanceAfter(myTeam, myId);
@@ -449,7 +450,7 @@ export default function TeamOnlineBattle() {
       if (pendingResult.defeated && allBossPlayersDefeated(updatedMap, participantsRef.current)) endText = 'Kael’Zor venceu.';
     }
     setMessages((items) => [...items, { id: uid(), team: 'system', turn, text: `${me.name} passou pelo time.`, timestamp: Date.now() }, ...extraMessages]);
-    relay({ action: 'pass', team: myTeam, playerId: myId, playerName: me.name, turn, ct: nextCT ? await withRemoteImageCT(nextCT) : undefined, pendingBossAttacks: nextPending, extraMessages, endText });
+    relay({ action: 'pass', sourceId: myId, team: myTeam, playerId: myId, playerName: me.name, turn, ct: nextCT ? await withRemoteImageCT(nextCT) : undefined, pendingBossAttacks: nextPending, extraMessages, endText });
     if (endText) finishBattle(endText);
     else advanceAfter(myTeam, myId);
   };
@@ -471,7 +472,7 @@ export default function TeamOnlineBattle() {
       });
       return next;
     });
-    if (broadcast) relay({ action: 'battle_end', text });
+    if (broadcast) relay({ action: 'battle_end', sourceId: myId, text });
   };
 
   const buildBossFieldAnalysis = (boss: BossState, alive: TeamParticipant[], ctMap: Record<string, CT>): PlayerActionAnalysis => {
@@ -567,7 +568,7 @@ export default function TeamOnlineBattle() {
     setMessages((items) => [...items, msg]);
     setCurrentTeam('team1');
     setCurrentPlayerId(alive[0]?.id || null);
-    relay({ action: 'boss_action', turn: bossTurn, bossState: nextBoss, pendingBossAttacks: nextPending, message: msg, nextPlayerId: alive[0]?.id || null });
+    relay({ action: 'boss_action', sourceId: myId, turn: bossTurn, bossState: nextBoss, pendingBossAttacks: nextPending, message: msg, nextPlayerId: alive[0]?.id || null });
   };
 
   const resolveOnlinePendingBossAttack = (
@@ -626,22 +627,36 @@ export default function TeamOnlineBattle() {
     lastChatAtRef.current = now;
     setChatText('');
     setMessages((items) => [...items, { id: uid(), team: myTeam, player: me.name, turn, text, timestamp: now }]);
-    relay({ action: 'chat', team: myTeam, playerName: me.name, turn, text, timestamp: now });
+    relay({ action: 'chat', sourceId: myId, team: myTeam, playerName: me.name, turn, text, timestamp: now });
   };
+
+  const currentPlayerName = currentTeam === 'boss'
+    ? 'Boss'
+    : participants.find(p => p.id === currentPlayerId)?.name || (currentTeam === 'team1' ? 'Time 1' : 'Time 2');
 
   return (
     <Screen scroll={false} testID="team-online-battle-screen">
       <Header title={bossMode ? 'MxH Online' : 'Online em equipe'} onBack={() => router.replace('/arena')} />
-      <View style={styles.statusBox}>
-        <Text style={styles.code}>{code}</Text>
-        <Text style={styles.status}>{matchType} • {bossMode ? 'Boss começa • 30 min' : `${turnMinutes} min`} • {connStatus}</Text>
-        <Text style={styles.status}>Você: {me.name} • {isSpectator ? 'Espectador' : myTeam === 'team1' ? 'Time 1' : 'Time 2'}</Text>
-      </View>
+      {!started ? (
+        <>
+          <View style={styles.statusBox}>
+            <Text style={styles.code}>{code}</Text>
+            <Text style={styles.status}>{matchType} • {bossMode ? 'Boss começa • 30 min' : `${turnMinutes} min`} • {connStatus}</Text>
+            <Text style={styles.status}>Você: {me.name} • {isSpectator ? 'Espectador' : myTeam === 'team1' ? 'Time 1' : 'Time 2'}</Text>
+          </View>
 
-      <View style={styles.teams}>
-        <TeamColumn title="Time 1" participants={participants.filter(p => p.team === 'team1')} ctByPlayer={ctByPlayer} />
-        <TeamColumn title={bossMode ? 'Boss' : 'Time 2'} participants={participants.filter(p => p.team === 'team2')} ctByPlayer={ctByPlayer} bossMode={bossMode} />
-      </View>
+          <View style={styles.teams}>
+            <TeamColumn title="Time 1" participants={participants.filter(p => p.team === 'team1')} ctByPlayer={ctByPlayer} />
+            <TeamColumn title={bossMode ? 'Boss' : 'Time 2'} participants={participants.filter(p => p.team === 'team2')} ctByPlayer={ctByPlayer} bossMode={bossMode} />
+          </View>
+        </>
+      ) : (
+        <View style={styles.compactStatus}>
+          <Text style={styles.compactTitle}>{bossMode ? 'MxH Online' : 'Online'} • {matchType}</Text>
+          <Text style={styles.compactLine}>Turno {turn} • Vez de {currentPlayerName}</Text>
+          <Text style={styles.compactCode}>Sala {code} • {connStatus}</Text>
+        </View>
+      )}
 
       {!started ? (
         <View style={styles.setup}>
@@ -668,7 +683,7 @@ export default function TeamOnlineBattle() {
         </View>
       ) : (
         <View style={styles.turnBox}>
-          <Text style={styles.turnText}>Turno {turn} • {currentTeam === 'boss' ? 'Boss' : currentTeam === 'team1' ? 'Time 1' : 'Time 2'}</Text>
+          <Text style={styles.turnText}>Turno {turn} • {currentPlayerName}</Text>
           <Text style={styles.hint}>{canAct() ? 'Sua vez de agir.' : isSpectator ? 'Espectador: chat liberado, ações bloqueadas.' : 'Aguardando o jogador da vez.'}</Text>
         </View>
       )}
@@ -803,6 +818,10 @@ const styles = StyleSheet.create({
   statusBox: { backgroundColor: theme.colors.surface, borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, padding: 10, gap: 4 },
   code: { color: '#fff', fontSize: 22, fontWeight: '900', letterSpacing: 2 },
   status: { color: theme.colors.textSecondary, fontSize: 12 },
+  compactStatus: { backgroundColor: 'rgba(255,59,0,0.08)', borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 10, gap: 2 },
+  compactTitle: { color: theme.colors.neon, fontSize: 11, fontWeight: '900', textTransform: 'uppercase' },
+  compactLine: { color: '#fff', fontSize: 13, fontWeight: '900' },
+  compactCode: { color: theme.colors.textMuted, fontSize: 11, fontWeight: '700' },
   teams: { flexDirection: 'row', gap: 8, marginTop: 8 },
   teamCol: { flex: 1, backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border, padding: 8, minHeight: 70 },
   teamTitle: { color: theme.colors.neon, fontWeight: '900', fontSize: 11, textTransform: 'uppercase' },

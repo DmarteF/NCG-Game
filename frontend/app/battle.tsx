@@ -382,7 +382,7 @@ export default function Battle() {
 
   const applyBossTargetHits = (attack: ReturnType<typeof resolveBossAttack>) => {
     const card = attack.card;
-    if (!card || card.kind !== 'attack' || !card.maxTargets) return [];
+    if (!card || (card.kind !== 'attack' && card.kind !== 'charge') || !card.maxTargets || attack.damagePossible <= 0) return [];
     let remainingTargets = card.maxTargets;
     const lines: string[] = [];
     const nextEffects: ActiveEffect[] = [];
