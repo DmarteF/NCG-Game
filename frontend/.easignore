@@ -1,0 +1,12 @@
+node_modules/
+.expo/
+.metro-cache/
+dist/
+web-build/
+.pytest_cache/
+__pycache__/
+../backend/.pytest_cache/
+../backend/__pycache__/
+../backend/tests/__pycache__/
+../test_reports/
+../memory/
