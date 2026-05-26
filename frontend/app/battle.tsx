@@ -8,7 +8,7 @@ import Input from '../src/components/Input';
 import Chip from '../src/components/Chip';
 import ZoomableImageModal from '../src/components/ZoomableImageModal';
 import { Storage, uid } from '../src/storage';
-import { BattleEntity, BossDifficulty, Card, CT, ChatMsg, MatchType, MomentaryAction, PlayedCard } from '../src/types';
+import { BattleEntity, BattleUseType, BossDifficulty, Card, CombatTargetKind, CT, ChatMsg, FieldPosition, MatchType, MomentaryAction, PlayedCard, TargetShape } from '../src/types';
 import { ATTRS, CT_ATTRS, Attr, theme, RANK_ORDER, CARD_RANKS, CARD_RANK_ORDER, CardRank, Rank } from '../src/theme';
 import { AttrEditor, UnlimitedEditor } from './card-edit';
 import { ctDisplayName, formatNumberBR, formatSpeed } from '../src/format';
@@ -37,6 +37,10 @@ const BOSS_DIFFICULTY_MAX_RANK: Record<BossDifficulty, CardRank> = { facil: 'B',
 const rankAllowedForBossDifficulty = (difficulty: BossDifficulty, rank: Rank | CardRank) => CARD_RANK_ORDER[rank as CardRank] <= CARD_RANK_ORDER[BOSS_DIFFICULTY_MAX_RANK[difficulty]];
 const bossDifficultyWarning = (difficulty: BossDifficulty) => `Esta dificuldade permite apenas C.T até Rank ${BOSS_DIFFICULTY_MAX_RANK[difficulty]}.`;
 const numericAttr = (value: number | 'ilimitado' | undefined) => typeof value === 'number' && Number.isFinite(value) ? value : 0;
+const PLAY_USE_TYPES: BattleUseType[] = ['ataque', 'defesa', 'movimentação', 'esquiva', 'aproximação', 'recuo', 'reposicionamento', 'ataque + movimentação', 'ataque + esquiva', 'defesa + movimentação'];
+const TARGET_SHAPES: TargetShape[] = ['único', 'área', 'linha', 'cone', 'grupo', 'todos ao redor'];
+const COMBAT_TARGETS: CombatTargetKind[] = ['C.T principal', 'Boss', 'invocação', 'clone', 'arma', 'barreira', 'modo/buff', 'grupo', 'outro'];
+const FIELD_POSITIONS: FieldPosition[] = ['chão', 'voando', 'perto', 'longe', 'escondido/invisível', 'rastreado', 'outra dimensão', 'protegido', 'atrás de clones'];
 
 function isDiverseSummonCard(card: Card) {
   return card.actionType === 'diverse_summon' || card.cardType === 'invocação diversa';
@@ -431,6 +435,13 @@ export default function Battle() {
       maxSpeed: analysis?.maxSpeed,
       attackPower: analysis?.attackPower ?? 0,
       defensePower: analysis?.defensePower ?? 0,
+      directHpThreat: analysis?.directHpThreat ?? false,
+      hybridEvasion: analysis?.hybridEvasion ?? false,
+      flying: analysis?.flying ?? false,
+      far: analysis?.far ?? false,
+      protectedByClones: true,
+      activeMode: analysis?.activeMode ?? false,
+      targetKind: analysis?.targetKind,
       text: analysis?.text ?? '',
     };
   };
@@ -837,6 +848,10 @@ function renderEffectLines(c: Card, action?: MomentaryAction) {
     if (c.movementType) lines.push(`Movimento: ${c.movementType}`);
     if (c.movementRange) lines.push(`Alcance: ${c.movementRange}`);
   }
+  if (c.battleUseType) lines.push(`Tipo usado nesta jogada: ${c.battleUseType}`);
+  if (c.combatTargetKind || c.effectTargetLabel) lines.push(`Alvo do efeito: ${[c.combatTargetKind, c.effectTargetLabel].filter(Boolean).join(' • ')}`);
+  if (c.costTargetLabel) lines.push(`Alvo do custo: ${c.costTargetLabel}`);
+  if (c.fieldPosition) lines.push(`Estado de campo: ${c.fieldPosition}`);
   if (c.actionType === 'perception' || c.cardType === 'percepção/rastreamento/reação') {
     lines.push(`Tipo: ${c.sensoryType || 'Percepção/reação'}`);
     if (c.detectsUntilSpeed != null) lines.push(`Detecta até Speed: ${speedValue(c.detectsUntilSpeed)}`);
@@ -861,7 +876,28 @@ function renderEffectLines(c: Card, action?: MomentaryAction) {
   }
   if (c.targetShape) lines.push(`Área/alvo: ${c.targetShape}`);
   if (c.targetCount) lines.push(`Alvos/quantidade: ${formatNumberBR(c.targetCount)}`);
+  if (c.actualTargets) lines.push(`Alvos reais nesta jogada: ${formatNumberBR(c.actualTargets)}`);
   if (c.maxTargets) lines.push(`Máx. alvos atingidos: ${formatNumberBR(c.maxTargets)}`);
+  const defenseFlags = [
+    c.ignoresCTDefense ? 'ignora DEF do C.T' : '',
+    c.ignoresCommonDefense ? 'ignora defesa comum' : '',
+    c.directHpDamage ? 'vai direto no HP' : '',
+    c.piercing ? 'perfuração' : '',
+    c.compatibleDefenseOnly ? 'só defesa compatível responde' : '',
+    c.stoppedBySpecificDefense ? 'pode ser parado por arma/barreira específica' : '',
+  ].filter(Boolean).join(' • ');
+  if (defenseFlags) lines.push(`Defesa: ${defenseFlags}`);
+  const hybridFlags = [
+    c.countsAsAttack ? 'ataque' : '',
+    c.countsAsDefense ? 'defesa' : '',
+    c.countsAsMovement ? 'movimentação' : '',
+    c.countsAsDodge ? 'esquiva' : '',
+    c.offensiveMovement ? 'movimentação ofensiva' : '',
+    c.evasiveMovement ? 'movimentação evasiva' : '',
+  ].filter(Boolean).join(' • ');
+  if (hybridFlags) lines.push(`Uso híbrido: ${hybridFlags}`);
+  if (c.compatibleDefenseNote) lines.push(`Defesa compatível: ${c.compatibleDefenseNote}`);
+  if (c.temporaryNote) lines.push(`Obs. da jogada: ${c.temporaryNote}`);
   if (action) {
     for (const attr of ATTRS.filter(a => action.final[a] != null)) {
       lines.push(`${attr} final: ${formatNumberBR(action.final[attr])}`);
@@ -920,6 +956,7 @@ function cloneCardForPlay(card: Card, captions: Record<string, string>) {
     unlimited: { ...card.unlimited },
     entityAttrs: card.entityAttrs ? { ...card.entityAttrs } : undefined,
     entityUnlimited: card.entityUnlimited ? { ...card.entityUnlimited } : undefined,
+    upkeepCost: card.upkeepCost ? { ...card.upkeepCost } : undefined,
   };
 }
 
@@ -945,6 +982,7 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
   const [step, setStep] = useState<'cards' | 'card-edit' | 'target' | 'checklist'>('cards');
   const [selectedCards, setSelectedCards] = useState<Card[]>([]);
   const [editIdx, setEditIdx] = useState(0);
+  const [editReturnToChecklist, setEditReturnToChecklist] = useState(false);
   const [activeEntityId, setActiveEntityId] = useState<string | null>(null);
   const [entityCostCardIds, setEntityCostCardIds] = useState<string[]>([]);
   const [entityBoostCardIds, setEntityBoostCardIds] = useState<string[]>([]);
@@ -957,6 +995,7 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
   useEffect(() => {
     if (visible) {
       setStep('cards'); setEditIdx(0); setActiveEntityId(null); setEntityCostCardIds([]); setEntityBoostCardIds([]); setObservation('');
+      setEditReturnToChecklist(false);
       setCardQuery(''); setCardRanks([]);
       Storage.getLastPlayedCardIds().then(setLastCardIds);
       Storage.getLastCardCaptions().then((captions) => {
@@ -976,16 +1015,35 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
   const updateCard = (patch: Partial<Card>) => {
     setSelectedCards(arr => arr.map((c, i) => i === editIdx ? { ...c, ...patch } : c));
   };
+  const removeSelectedCard = (index: number) => {
+    const removed = selectedCards[index];
+    setSelectedCards(arr => arr.filter((_, i) => i !== index));
+    if (removed) {
+      setEntityCostCardIds(ids => ids.filter(id => id !== removed.id));
+      setEntityBoostCardIds(ids => ids.filter(id => id !== removed.id));
+    }
+    setEditIdx(0);
+  };
+  const editSelectedCard = (index: number) => {
+    setEditIdx(index);
+    setEditReturnToChecklist(true);
+    setStep('card-edit');
+  };
 
   const goEditCards = () => {
     if (selectedCards.length === 0) {
       setStep('target');
       return;
     }
-    setEditIdx(0); setStep('card-edit');
+    setEditIdx(0); setEditReturnToChecklist(false); setStep('card-edit');
   };
 
   const finishCardEdits = () => {
+    if (editReturnToChecklist) {
+      setEditReturnToChecklist(false);
+      setStep('checklist');
+      return;
+    }
     if (editIdx + 1 < selectedCards.length) setEditIdx(editIdx + 1);
     else setStep('target');
   };
@@ -1227,7 +1285,21 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
               return (
                 <View style={styles.checklistBox}>
                   <Text style={styles.label}>Resumo antes de enviar</Text>
-                  <Text style={styles.attrLine}>Cards selecionados: {selectedCards.map(card => card.name).join(', ') || 'nenhum'}</Text>
+                  <View style={styles.checkCardsList}>
+                    {selectedCards.length === 0 ? <Text style={styles.attrLine}>Cards selecionados: nenhum</Text> : null}
+                    {selectedCards.map((card, index) => (
+                      <View key={`${card.id}-${index}`} style={styles.checkCardItem}>
+                        <Text style={styles.cardName}>{index + 1}. {card.name}</Text>
+                        <Text style={styles.obs}>
+                          {[card.battleUseType, card.targetShape, card.actualTargets ? `${formatNumberBR(card.actualTargets)} alvos reais` : '', card.directHpDamage ? 'dano direto no HP' : '', card.fieldPosition].filter(Boolean).join(' • ') || 'Sem ajuste especial nesta jogada'}
+                        </Text>
+                        <View style={styles.checkCardActions}>
+                          <Button title="Editar" small variant="secondary" onPress={() => editSelectedCard(index)} testID={`check-edit-${card.id}`} />
+                          <Button title="Remover" small variant="ghost" onPress={() => removeSelectedCard(index)} testID={`check-remove-${card.id}`} />
+                        </View>
+                      </View>
+                    ))}
+                  </View>
                   <Text style={styles.attrLine}>Custo total: {preview?.cost || 'sem custo'}</Text>
                   <Text style={styles.attrLine}>Alvo do custo: {activeEntity ? activeEntity.name : 'O C.T principal'}</Text>
                   <Text style={styles.attrLine}>Modos ativos: {preview?.modes || 'nenhum'}</Text>
@@ -1244,11 +1316,14 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
 
           <View style={styles.modalFooter}>
             {step === 'cards' && <Button title="Avançar" onPress={goEditCards} testID="play-next-cards" />}
-            {step === 'card-edit' && <Button title={editIdx + 1 < selectedCards.length ? 'Próximo card' : 'Escolher alvo'} onPress={finishCardEdits} testID="play-next-card-edit" />}
+            {step === 'card-edit' && <Button title={editReturnToChecklist ? 'Voltar ao checklist' : editIdx + 1 < selectedCards.length ? 'Próximo card' : 'Escolher alvo'} onPress={finishCardEdits} testID="play-next-card-edit" />}
             {step === 'target' && <Button title="Revisar jogada" onPress={() => setStep('checklist')} testID="play-review-btn" />}
             {step === 'checklist' && (
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <Button title="Voltar e editar" variant="ghost" onPress={() => setStep('target')} style={{ flex: 1 }} testID="play-edit-btn" />
+              <View style={{ gap: 8 }}>
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  <Button title="Seleção" variant="ghost" onPress={() => setStep('cards')} style={{ flex: 1 }} testID="play-back-selection-btn" />
+                  <Button title="Alvos" variant="secondary" onPress={() => setStep('target')} style={{ flex: 1 }} testID="play-edit-btn" />
+                </View>
                 <Button title="Confirmar jogada" onPress={confirmPlay} style={{ flex: 1 }} testID="play-confirm-btn" />
               </View>
             )}
@@ -1261,6 +1336,11 @@ function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], boss
 
 function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<Card>) => void }) {
   const showMomentary = card.actionType === 'attack' || card.actionType === 'defense' || card.actionType === 'equipment';
+  const setNumber = (key: keyof Card, text: string) => {
+    const value = Number(text.replace(/[^\d.-]/g, ''));
+    onChange({ [key]: Number.isFinite(value) ? value : undefined } as Partial<Card>);
+  };
+  const toggle = (key: keyof Card) => onChange({ [key]: !card[key] } as Partial<Card>);
   return (
     <View>
       <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center', marginBottom: 10 }}>
@@ -1268,6 +1348,59 @@ function CardEditInline({ card, onChange }: { card: Card; onChange: (p: Partial<
         <Text style={styles.pickName}>{[`${card.name} — ${card.rank || 'E'}`, formatSpeed(card.speed)].filter(Boolean).join(' • ')}</Text>
       </View>
       <Input label="Legenda (desta jogada)" value={card.caption} onChangeText={(t) => onChange({ caption: t })} multiline numberOfLines={3} style={{ minHeight: 70, textAlignVertical: 'top' }} testID="play-card-caption" />
+      <Text style={styles.label}>Ajuste da jogada</Text>
+      <View style={styles.chipsRow}>
+        {PLAY_USE_TYPES.map(type => (
+          <Chip key={type} label={type} active={card.battleUseType === type} onPress={() => onChange({
+            battleUseType: type,
+            countsAsAttack: type.includes('ataque') || card.countsAsAttack,
+            countsAsDefense: type.includes('defesa') || card.countsAsDefense,
+            countsAsMovement: ['movimentação', 'aproximação', 'recuo', 'reposicionamento'].some(word => type.includes(word)) || card.countsAsMovement,
+            countsAsDodge: type.includes('esquiva') || card.countsAsDodge,
+          })} testID={`play-use-${card.id}-${type}`} />
+        ))}
+      </View>
+      <Text style={styles.label}>Alvo dinâmico</Text>
+      <View style={styles.chipsRow}>
+        {TARGET_SHAPES.map(shape => <Chip key={shape} label={shape} active={card.targetShape === shape} onPress={() => onChange({ targetShape: shape })} testID={`play-shape-${card.id}-${shape}`} />)}
+      </View>
+      <View style={styles.row2}>
+        <Input label="Qtd declarada" value={card.targetCount != null ? String(card.targetCount) : ''} onChangeText={(text) => setNumber('targetCount', text)} keyboardType="numeric" />
+        <Input label="Alvos reais" value={card.actualTargets != null ? String(card.actualTargets) : ''} onChangeText={(text) => setNumber('actualTargets', text)} keyboardType="numeric" />
+      </View>
+      <Input label="Máximo de alvos nesta jogada" value={card.maxTargets != null ? String(card.maxTargets) : ''} onChangeText={(text) => setNumber('maxTargets', text)} keyboardType="numeric" testID={`play-max-targets-${card.id}`} />
+      <View style={styles.chipsRow}>
+        {COMBAT_TARGETS.map(target => <Chip key={target} label={target} active={card.combatTargetKind === target} onPress={() => onChange({ combatTargetKind: target })} testID={`play-target-kind-${card.id}-${target}`} />)}
+      </View>
+      <Input label="Alvo do efeito" value={card.effectTargetLabel || ''} onChangeText={(text) => onChange({ effectTargetLabel: text })} placeholder="Ex: Boss, clone principal, arma equipada" />
+      <Input label="Alvo do custo" value={card.costTargetLabel || ''} onChangeText={(text) => onChange({ costTargetLabel: text })} placeholder="Ex: C.T principal, invocação, arma" />
+      <Text style={styles.label}>Estado de campo</Text>
+      <View style={styles.chipsRow}>
+        {FIELD_POSITIONS.map(position => <Chip key={position} label={position} active={card.fieldPosition === position} onPress={() => onChange({ fieldPosition: position })} testID={`play-field-${card.id}-${position}`} />)}
+      </View>
+      <Text style={styles.label}>Dano e defesa</Text>
+      <View style={styles.chipsRow}>
+        <Chip label="Ignora DEF do C.T" active={!!card.ignoresCTDefense} onPress={() => toggle('ignoresCTDefense')} testID={`play-ignore-ct-def-${card.id}`} />
+        <Chip label="Ignora defesa comum" active={!!card.ignoresCommonDefense} onPress={() => toggle('ignoresCommonDefense')} testID={`play-ignore-common-def-${card.id}`} />
+        <Chip label="Direto no HP" active={!!card.directHpDamage} onPress={() => toggle('directHpDamage')} testID={`play-direct-hp-${card.id}`} />
+        <Chip label="Perfuração" active={!!card.piercing} onPress={() => toggle('piercing')} testID={`play-piercing-${card.id}`} />
+        <Chip label="Só defesa compatível" active={!!card.compatibleDefenseOnly} onPress={() => toggle('compatibleDefenseOnly')} testID={`play-compatible-only-${card.id}`} />
+        <Chip label="Barreira/arma específica" active={!!card.stoppedBySpecificDefense} onPress={() => toggle('stoppedBySpecificDefense')} testID={`play-specific-stop-${card.id}`} />
+      </View>
+      <Input label="Defesa compatível / exceção" value={card.compatibleDefenseNote || ''} onChangeText={(text) => onChange({ compatibleDefenseNote: text })} placeholder="Ex: apenas barreira dimensional ou arma de mesmo tipo" />
+      <Text style={styles.label}>Uso híbrido</Text>
+      <View style={styles.chipsRow}>
+        <Chip label="Ataque" active={!!card.countsAsAttack} onPress={() => toggle('countsAsAttack')} />
+        <Chip label="Defesa" active={!!card.countsAsDefense} onPress={() => toggle('countsAsDefense')} />
+        <Chip label="Movimentação" active={!!card.countsAsMovement} onPress={() => toggle('countsAsMovement')} />
+        <Chip label="Esquiva" active={!!card.countsAsDodge} onPress={() => toggle('countsAsDodge')} />
+        <Chip label="Mov. ofensiva" active={!!card.offensiveMovement} onPress={() => toggle('offensiveMovement')} />
+        <Chip label="Mov. evasiva" active={!!card.evasiveMovement} onPress={() => toggle('evasiveMovement')} />
+      </View>
+      <Input label="Duração nesta jogada" value={card.durationTurns != null ? String(card.durationTurns) : ''} onChangeText={(text) => setNumber('durationTurns', text)} keyboardType="numeric" />
+      <Text style={styles.label}>Custo por turno</Text>
+      <AttrEditor label="Custo por turno" values={card.upkeepCost || {}} setValues={(v) => onChange({ upkeepCost: v })} keyPrefix={`play-upkeep-${card.id}`} />
+      <Input label="Observação temporária" value={card.temporaryNote || ''} onChangeText={(text) => onChange({ temporaryNote: text })} multiline numberOfLines={2} style={{ minHeight: 60, textAlignVertical: 'top' }} />
       {showMomentary ? (
         <>
           <Text style={styles.label}>Valor momentâneo</Text>
@@ -1373,7 +1506,11 @@ const styles = StyleSheet.create({
   pickName: { color: '#fff', fontWeight: '800', fontSize: 14 },
   pickSub: { color: theme.colors.textSecondary, fontSize: 11 },
   chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  row2: { gap: 4 },
   checklistBox: { gap: 7, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, padding: 12 },
+  checkCardsList: { gap: 8 },
+  checkCardItem: { backgroundColor: 'rgba(0,0,0,0.22)', borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border, padding: 10, gap: 5 },
+  checkCardActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   inlineRank: { alignSelf: 'flex-start', color: '#fff', backgroundColor: theme.colors.primary, overflow: 'hidden', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1, fontSize: 10, fontWeight: '900', marginTop: 2 },
   inlineRankSpecial: { backgroundColor: theme.colors.gold },
   zoomWrap: { flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', alignItems: 'center', justifyContent: 'center' },

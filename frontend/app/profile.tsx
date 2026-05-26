@@ -9,7 +9,7 @@ import ImagePickerField from '../src/components/ImagePickerField';
 import { Storage } from '../src/storage';
 import { VILLAGES, theme } from '../src/theme';
 import { BattleHistoryItem } from '../src/types';
-import { copyOrShareHistory, exportHistoryText } from '../src/historyExport';
+import { copyOrShareHistory, exportHistoryPdf, exportHistoryText, exportSummaryCard, videoExportNotice } from '../src/historyExport';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -19,6 +19,7 @@ export default function ProfileScreen() {
   const [backgroundImage, setBackgroundImage] = useState<string | undefined>();
   const [history, setHistory] = useState<BattleHistoryItem[]>([]);
   const [replay, setReplay] = useState<BattleHistoryItem | null>(null);
+  const [replayIndex, setReplayIndex] = useState(0);
 
   useEffect(() => {
     Storage.getProfile().then((p) => {
@@ -104,8 +105,9 @@ export default function ProfileScreen() {
             <Text style={styles.replayTitle}>{index + 1}. {item.config.matchType} • {new Date(item.endedAt).toLocaleString()}</Text>
             <Text style={styles.bgHint}>{item.result || 'Sem resultado'}{item.config.bossDifficulty ? ` • Boss ${item.config.bossDifficulty}` : ''}</Text>
             <View style={styles.replayActions}>
-              <Button title="Ver replay" variant="secondary" small onPress={() => setReplay(item)} />
+              <Button title="Ver replay" variant="secondary" small onPress={() => { setReplay(item); setReplayIndex(0); }} />
               <Button title="Copiar histórico" small onPress={() => copyOrShareHistory(item)} />
+              <Button title="Exportar PDF" small variant="secondary" onPress={() => exportHistoryPdf(item)} />
               <Button title="Apagar" variant="ghost" small onPress={async () => {
                 const next = history.filter(saved => saved.id !== item.id);
                 setHistory(next);
@@ -124,15 +126,71 @@ export default function ProfileScreen() {
       <Modal visible={!!replay} transparent animationType="slide" onRequestClose={() => setReplay(null)}>
         <View style={styles.modalWrap}>
           <View style={styles.modalCard}>
-            <Header title="Replay local" onBack={() => setReplay(null)} />
-            <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
-              <Text style={styles.replayText}>{replay ? exportHistoryText(replay) : ''}</Text>
-            </ScrollView>
-            {replay ? <Button title="Copiar histórico" onPress={() => copyOrShareHistory(replay)} /> : null}
+            <Header title="Replay espectador" onBack={() => setReplay(null)} />
+            {replay ? <ReplaySpectator item={replay} index={replayIndex} setIndex={setReplayIndex} /> : null}
+            {replay ? (
+              <View style={styles.replayExportBar}>
+                <Button title="Copiar histórico" small onPress={() => copyOrShareHistory(replay)} />
+                <Button title="Exportar PDF" small variant="secondary" onPress={() => exportHistoryPdf(replay)} />
+                <Button title="Exportar card resumo" small variant="secondary" onPress={() => exportSummaryCard(replay)} />
+                <Button title="Exportar vídeo" small variant="ghost" onPress={videoExportNotice} />
+              </View>
+            ) : null}
           </View>
         </View>
       </Modal>
     </Screen>
+  );
+}
+
+function ReplaySpectator({ item, index, setIndex }: { item: BattleHistoryItem; index: number; setIndex: (value: number) => void }) {
+  const messages = item.messages;
+  const current = messages[index];
+  const started = new Date(item.config.startedAt).toLocaleString();
+  const ended = new Date(item.endedAt).toLocaleString();
+  const durationMs = Math.max(0, item.endedAt - item.config.startedAt);
+  const duration = `${Math.floor(durationMs / 60000)}min ${Math.floor((durationMs % 60000) / 1000)}s`;
+  const clamp = (value: number) => Math.max(0, Math.min(messages.length - 1, value));
+  return (
+    <View style={{ flex: 1 }}>
+      <View style={styles.spectatorHeader}>
+        <Text style={styles.replayTitle}>{item.config.matchType} • {item.result || 'Sem resultado'}</Text>
+        <Text style={styles.bgHint}>Início {started} • Fim {ended} • Duração {duration}{item.config.bossDifficulty ? ` • Boss ${item.config.bossDifficulty}` : ''}</Text>
+      </View>
+      <View style={styles.replayNav}>
+        <Button title="Início" small variant="ghost" onPress={() => setIndex(0)} disabled={index === 0} />
+        <Button title="Voltar" small variant="secondary" onPress={() => setIndex(clamp(index - 1))} disabled={index === 0} />
+        <Text style={styles.replayCounter}>{messages.length ? `${index + 1}/${messages.length}` : '0/0'}</Text>
+        <Button title="Avançar" small variant="secondary" onPress={() => setIndex(clamp(index + 1))} disabled={index >= messages.length - 1} />
+        <Button title="Final" small variant="ghost" onPress={() => setIndex(messages.length - 1)} disabled={index >= messages.length - 1} />
+      </View>
+      <ScrollView contentContainerStyle={{ paddingBottom: 20, gap: 8 }}>
+        {current ? (
+          <View style={styles.spectatorTurn}>
+            <Text style={styles.replayTitle}>Turno {current.turn} • {current.team}</Text>
+            {current.text ? <Text style={styles.replayText}>{current.text}</Text> : null}
+            {(current.playedCards || []).map((played, cardIndex) => (
+              <View key={`${played.cardSnapshot.id}-${cardIndex}`} style={styles.spectatorCard}>
+                <Text style={styles.replayTitle}>{played.cardSnapshot.name} • Rank {played.cardSnapshot.rank || 'E'}</Text>
+                {played.cardSnapshot.caption ? <Text style={styles.bgHint}>{played.cardSnapshot.caption}</Text> : null}
+                <Text style={styles.bgHint}>{[
+                  played.cardSnapshot.battleUseType,
+                  played.cardSnapshot.targetShape,
+                  played.cardSnapshot.actualTargets ? `${played.cardSnapshot.actualTargets} alvos reais` : '',
+                  played.cardSnapshot.directHpDamage ? 'dano direto no HP' : '',
+                ].filter(Boolean).join(' • ') || 'Card sem ajuste extra'}</Text>
+              </View>
+            ))}
+            {(current.calculationDetails || []).length > 0 ? (
+              <View style={styles.calcReplayBox}>
+                {(current.calculationDetails || []).map((line, lineIndex) => <Text key={lineIndex} style={styles.bgHint}>{line}</Text>)}
+              </View>
+            ) : null}
+          </View>
+        ) : <Text style={styles.bgHint}>Replay vazio.</Text>}
+        <Text style={styles.replayText}>{exportHistoryText(item)}</Text>
+      </ScrollView>
+    </View>
   );
 }
 
@@ -186,5 +244,12 @@ const styles = StyleSheet.create({
   modalWrap: { flex: 1, backgroundColor: theme.colors.overlay, justifyContent: 'flex-end' },
   modalCard: { height: '86%', backgroundColor: theme.colors.bg, borderTopLeftRadius: 18, borderTopRightRadius: 18, padding: 14, borderWidth: 1, borderColor: theme.colors.border },
   replayText: { color: '#fff', fontSize: 12, lineHeight: 18 },
+  spectatorHeader: { gap: 4, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border, backgroundColor: 'rgba(255,255,255,0.04)', marginBottom: 8 },
+  replayNav: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 8 },
+  replayCounter: { color: '#fff', fontWeight: '900', fontSize: 12, minWidth: 44, textAlign: 'center' },
+  spectatorTurn: { gap: 8, backgroundColor: 'rgba(0,0,0,0.22)', borderRadius: 10, borderWidth: 1, borderColor: theme.colors.border, padding: 10 },
+  spectatorCard: { gap: 4, backgroundColor: 'rgba(255,59,0,0.08)', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,59,0,0.24)', padding: 8 },
+  calcReplayBox: { gap: 3, borderTopWidth: 1, borderColor: theme.colors.border, paddingTop: 8 },
+  replayExportBar: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingTop: 8, borderTopWidth: 1, borderColor: theme.colors.border },
   actions: { flexDirection: 'row', gap: 12, marginTop: 12 },
 });

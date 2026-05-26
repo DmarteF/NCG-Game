@@ -7,7 +7,7 @@ import Input from '../src/components/Input';
 import ImagePickerField from '../src/components/ImagePickerField';
 import Chip from '../src/components/Chip';
 import { Storage, uid } from '../src/storage';
-import { Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType, CardType, DurationType, CardSpeed, MovementRange, MovementType, DiverseSummonType, TargetShape, SensoryType } from '../src/types';
+import { BattleUseType, Card, CardActionType, CardEffect, AttrValues, UnlimitedFlags, EntityType, CardType, DurationType, CardSpeed, MovementRange, MovementType, DiverseSummonType, TargetShape, SensoryType } from '../src/types';
 import { ATTRS, Attr, theme, CARD_RANKS, CardRank } from '../src/theme';
 import { Header } from './profile';
 import { formatNumberBR } from '../src/format';
@@ -97,6 +97,18 @@ const SENSOR_FLAGS: { key: 'detectsInvisibility' | 'detectsChakra' | 'detectsPre
   { key: 'tracksTarget', label: 'Rastreia alvo' },
   { key: 'tracksMovement', label: 'Rastreia movimento' },
 ];
+const BATTLE_USE_TYPES: { id: BattleUseType; label: string }[] = [
+  { id: 'ataque', label: 'Ataque' },
+  { id: 'defesa', label: 'Defesa' },
+  { id: 'movimentação', label: 'Movimentação' },
+  { id: 'esquiva', label: 'Esquiva' },
+  { id: 'aproximação', label: 'Aproximação' },
+  { id: 'recuo', label: 'Recuo' },
+  { id: 'reposicionamento', label: 'Reposicionamento' },
+  { id: 'ataque + movimentação', label: 'Ataque + mov.' },
+  { id: 'ataque + esquiva', label: 'Ataque + esquiva' },
+  { id: 'defesa + movimentação', label: 'Defesa + mov.' },
+];
 const SPEED_OPTIONS: { value: CardSpeed | undefined; label: string }[] = [
   { value: undefined, label: 'Sem Speed' },
   { value: 0, label: 'Speed 0' },
@@ -139,6 +151,9 @@ export default function CardEdit() {
   const [targetCount, setTargetCount] = useState(0);
   const [maxTargets, setMaxTargets] = useState(0);
   const [targetShape, setTargetShape] = useState<TargetShape | undefined>();
+  const [battleUseType, setBattleUseType] = useState<BattleUseType | undefined>();
+  const [combatFlags, setCombatFlags] = useState<Record<string, boolean>>({});
+  const [compatibleDefenseNote, setCompatibleDefenseNote] = useState('');
   const [durationType, setDurationType] = useState<DurationType>('instantâneo');
   const [durationTurns, setDurationTurns] = useState(0);
   const [upkeepCost, setUpkeepCost] = useState<AttrValues>({});
@@ -182,6 +197,22 @@ export default function CardEdit() {
         setTargetCount(c.targetCount || 0);
         setMaxTargets(c.maxTargets || 0);
         setTargetShape(c.targetShape);
+        setBattleUseType(c.battleUseType);
+        setCombatFlags({
+          ignoresCTDefense: !!c.ignoresCTDefense,
+          ignoresCommonDefense: !!c.ignoresCommonDefense,
+          directHpDamage: !!c.directHpDamage,
+          piercing: !!c.piercing,
+          compatibleDefenseOnly: !!c.compatibleDefenseOnly,
+          stoppedBySpecificDefense: !!c.stoppedBySpecificDefense,
+          countsAsAttack: !!c.countsAsAttack,
+          countsAsDefense: !!c.countsAsDefense,
+          countsAsMovement: !!c.countsAsMovement,
+          countsAsDodge: !!c.countsAsDodge,
+          offensiveMovement: !!c.offensiveMovement,
+          evasiveMovement: !!c.evasiveMovement,
+        });
+        setCompatibleDefenseNote(c.compatibleDefenseNote || '');
         setDurationType(c.durationType || 'instantâneo');
         setDurationTurns(c.durationTurns || 0);
         setUpkeepCost(c.upkeepCost || {});
@@ -224,6 +255,20 @@ export default function CardEdit() {
       targetCount: showTargeting ? cleanOptionalNum(targetCount) : undefined,
       maxTargets: showTargeting ? cleanOptionalNum(maxTargets) : undefined,
       targetShape: showTargeting ? targetShape : undefined,
+      battleUseType,
+      ignoresCTDefense: !!combatFlags.ignoresCTDefense,
+      ignoresCommonDefense: !!combatFlags.ignoresCommonDefense,
+      directHpDamage: !!combatFlags.directHpDamage,
+      piercing: !!combatFlags.piercing,
+      compatibleDefenseOnly: !!combatFlags.compatibleDefenseOnly,
+      stoppedBySpecificDefense: !!combatFlags.stoppedBySpecificDefense,
+      compatibleDefenseNote: compatibleDefenseNote.trim() || undefined,
+      countsAsAttack: !!combatFlags.countsAsAttack,
+      countsAsDefense: !!combatFlags.countsAsDefense,
+      countsAsMovement: !!combatFlags.countsAsMovement,
+      countsAsDodge: !!combatFlags.countsAsDodge,
+      offensiveMovement: !!combatFlags.offensiveMovement,
+      evasiveMovement: !!combatFlags.evasiveMovement,
       durationType,
       durationTurns: sanitizeNum(String(durationTurns)),
       upkeepCost: durationType !== 'instantâneo' ? cleanAttrs(upkeepCost) : {},
@@ -451,6 +496,52 @@ export default function CardEdit() {
           <Input label={`Máximo de alvos atingidos (${formatNumberBR(maxTargets)})`} value={String(maxTargets)} onChangeText={(t) => setMaxTargets(sanitizeNum(t))} keyboardType="numeric" testID="max-targets-input" />
         </View>
       ) : null}
+
+      <Text style={styles.label}>Uso em batalha</Text>
+      <View style={styles.chipsRow}>
+        {BATTLE_USE_TYPES.map(option => (
+          <Chip
+            key={option.id}
+            label={option.label}
+            active={battleUseType === option.id}
+            onPress={() => setBattleUseType(option.id)}
+            testID={`battle-use-${option.id}`}
+          />
+        ))}
+      </View>
+
+      <Text style={styles.label}>Arma / dano direto / híbrido</Text>
+      <View style={styles.chipsRow}>
+        {[
+          ['ignoresCTDefense', 'Ignora DEF do C.T'],
+          ['ignoresCommonDefense', 'Ignora defesa comum'],
+          ['directHpDamage', 'Vai direto no HP'],
+          ['piercing', 'Perfuração'],
+          ['compatibleDefenseOnly', 'Só defesa compatível'],
+          ['stoppedBySpecificDefense', 'Parado por arma/barreira específica'],
+          ['countsAsAttack', 'Conta como ataque'],
+          ['countsAsDefense', 'Conta como defesa'],
+          ['countsAsMovement', 'Conta como movimentação'],
+          ['countsAsDodge', 'Conta como esquiva'],
+          ['offensiveMovement', 'Mov. ofensiva'],
+          ['evasiveMovement', 'Mov. evasiva'],
+        ].map(([key, label]) => (
+          <Chip
+            key={key}
+            label={label}
+            active={!!combatFlags[key]}
+            onPress={() => setCombatFlags(flags => ({ ...flags, [key]: !flags[key] }))}
+            testID={`combat-flag-${key}`}
+          />
+        ))}
+      </View>
+      <Input
+        label="Defesa compatível / exceção"
+        value={compatibleDefenseNote}
+        onChangeText={setCompatibleDefenseNote}
+        placeholder="Ex: só barreira dimensional ou arma específica bloqueia."
+        testID="compatible-defense-note"
+      />
 
       {showEntityFields ? (
         <>

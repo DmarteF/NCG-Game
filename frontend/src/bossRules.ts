@@ -18,6 +18,13 @@ export type PlayerActionAnalysis = {
   maxSpeed: number | 'instant' | undefined;
   attackPower: number;
   defensePower: number;
+  directHpThreat: boolean;
+  hybridEvasion: boolean;
+  flying: boolean;
+  far: boolean;
+  protectedByClones: boolean;
+  activeMode: boolean;
+  targetKind?: string;
   text: string;
 };
 
@@ -72,7 +79,8 @@ function mergeMaxSpeed(a: PlayerActionAnalysis['maxSpeed'], b: PlayerActionAnaly
 function ownAttackFromCards(cards: PlayedCard[]) {
   return cards.reduce((sum, played) => {
     const card = played.cardSnapshot;
-    return sum + numeric(card.momentaryAttrs?.Atk) + (card.actionType === 'attack' ? numeric(card.boost?.Atk) : 0);
+    const useAsAttack = card.actionType === 'attack' || card.countsAsAttack || card.battleUseType?.includes('ataque');
+    return sum + numeric(card.momentaryAttrs?.Atk) + (useAsAttack ? numeric(card.boost?.Atk) : 0);
   }, 0);
 }
 
@@ -89,7 +97,7 @@ function structuredTargetCount(cards: PlayedCard[], cloneCount: number) {
     const card = played.cardSnapshot;
     const shapeTargets = card.targetShape && card.targetShape !== 'único' ? Math.max(2, numeric(card.targetCount), cloneCount) : 0;
     const summonTargets = card.actionType === 'diverse_summon' || card.cardType === 'invocação diversa' ? numeric(card.summonQuantity) : 0;
-    return Math.max(max, numeric(card.targetCount), summonTargets, shapeTargets);
+    return Math.max(max, numeric(card.actualTargets), numeric(card.targetCount), numeric(card.maxTargets), summonTargets, shapeTargets);
   }, Math.max(1, cloneCount));
 }
 
@@ -97,6 +105,7 @@ function hasStructuredArea(cards: PlayedCard[]) {
   return cards.some(({ cardSnapshot: card }) => Boolean(
     card.targetShape && card.targetShape !== 'único'
     || numeric(card.maxTargets) > 1
+    || numeric(card.actualTargets) > 1
     || numeric(card.targetCount) > 1
     || card.actionType === 'diverse_summon'
     || card.cardType === 'invocação diversa'
@@ -124,11 +133,18 @@ export function analyzePlayerAction(
 
   const momentaryAtk = momentaryActions.reduce((sum, action) => sum + numeric(action.final.Atk), 0);
   const momentaryDef = momentaryActions.reduce((sum, action) => sum + numeric(action.final.Def), 0);
+  const directHpThreat = playedCards.some(item => item.cardSnapshot.directHpDamage || item.cardSnapshot.ignoresCTDefense || item.cardSnapshot.ignoresCommonDefense);
+  const hybridEvasion = playedCards.some(item => item.cardSnapshot.countsAsDodge || item.cardSnapshot.evasiveMovement || item.cardSnapshot.battleUseType?.includes('esquiva') || item.cardSnapshot.battleUseType?.includes('movimentação'));
+  const activeMode = playedCards.some(item => item.cardSnapshot.actionType === 'mode' || item.cardSnapshot.cardType === 'modo/buff');
+  const flying = playedCards.some(item => item.cardSnapshot.fieldPosition === 'voando') || keyword(text, ['voando', 'voo', 'aéreo', 'aereo']);
+  const far = playedCards.some(item => item.cardSnapshot.fieldPosition === 'longe' || item.cardSnapshot.fieldPosition === 'outra dimensão') || keyword(text, ['longe', 'distante', 'outra dimensão', 'outra dimensao']);
+  const protectedByClones = cloneCount > 0 || playedCards.some(item => item.cardSnapshot.fieldPosition === 'atrás de clones');
+  const targetKind = playedCards.map(item => item.cardSnapshot.combatTargetKind).find(Boolean);
   const attackPower = momentaryAtk || ownAttackFromCards(playedCards) || (keyword(text, ['ataque', 'dano', 'golpe', 'rasengan', 'corte', 'explosão', 'explosao']) ? numeric(finalAttrs.Atk) : 0);
-  const defensePower = momentaryDef || (keyword(text, ['defesa', 'barreira', 'bloqueio', 'escudo', 'cúpula', 'cupula']) ? numeric(finalAttrs.Def) : 0);
+  const defensePower = momentaryDef || (playedCards.some(item => item.cardSnapshot.countsAsDefense) ? numeric(finalAttrs.Def) : 0) || (keyword(text, ['defesa', 'barreira', 'bloqueio', 'escudo', 'cúpula', 'cupula']) ? numeric(finalAttrs.Def) : 0);
 
   return {
-    isAttack: attackPower > 0 || keyword(text, ['ataque', 'dano', 'golpe', 'rasengan', 'corte', 'explosão', 'explosao']),
+    isAttack: attackPower > 0 || directHpThreat || keyword(text, ['ataque', 'dano', 'golpe', 'rasengan', 'corte', 'explosão', 'explosao']),
     isDefense: defensePower > 0 || keyword(text, ['defesa', 'barreira', 'bloqueio', 'escudo', 'cúpula', 'cupula']),
     isGenjutsu: keyword(text, ['genjutsu', 'ilusão', 'ilusao', 'mente', 'mental']),
     isSealing: keyword(text, ['selo', 'selamento', 'aprisionar', 'prender']),
@@ -140,6 +156,13 @@ export function analyzePlayerAction(
     maxSpeed,
     attackPower,
     defensePower,
+    directHpThreat,
+    hybridEvasion,
+    flying,
+    far,
+    protectedByClones,
+    activeMode,
+    targetKind,
     text,
   };
 }
@@ -179,6 +202,8 @@ function chooseDefense(analysis: PlayerActionAnalysis, boss: BossState) {
   };
   if (analysis.isGenjutsu) add('mente-vazia-boss');
   add('olhos-vazio-rachado-boss');
+  if (analysis.directHpThreat) add('deslocamento-vazio-rachado-boss');
+  if (analysis.directHpThreat) add('reflexo-abissal-boss');
   if (analysis.isArea) add('cupula-vazio-boss');
   if (!analysis.isArea) add('barreira-rachada-boss');
   if (analysis.attackPower > 0 && analysis.attackPower <= 500000) add('reflexo-abissal-boss');
@@ -237,9 +262,9 @@ export function resolveBossDefense(
       lastPlayerCards: playedCards.map(item => item.cardSnapshot.name).slice(-5),
       playerUsesClones: analysis.cloneCount > 0 || !!nextBoss.bossMemory?.playerUsesClones,
       playerUsesGenjutsu: analysis.isGenjutsu || !!nextBoss.bossMemory?.playerUsesGenjutsu,
-      playerUsesStrongMode: playedCards.some(item => item.cardSnapshot.actionType === 'mode' || item.cardSnapshot.cardType === 'modo/buff') || !!nextBoss.bossMemory?.playerUsesStrongMode,
+      playerUsesStrongMode: analysis.activeMode || !!nextBoss.bossMemory?.playerUsesStrongMode,
       lastDamageTaken: damageTaken,
-      threatScore: Math.max(0, Math.floor(damageTaken / 50000) + analysis.cloneCount + (analysis.isGenjutsu ? 5 : 0) + (analysis.isSealing ? 5 : 0) + (analysis.maxSpeed === 'instant' ? 8 : Number(analysis.maxSpeed || 0))),
+      threatScore: Math.max(0, Math.floor(damageTaken / 50000) + analysis.cloneCount + (analysis.directHpThreat ? 8 : 0) + (analysis.hybridEvasion ? 4 : 0) + (analysis.activeMode ? 5 : 0) + (analysis.isGenjutsu ? 5 : 0) + (analysis.isSealing ? 5 : 0) + (analysis.maxSpeed === 'instant' ? 8 : Number(analysis.maxSpeed || 0))),
     },
   };
   if (bossDebug) lines.push(`Atk final analisado: ${formatNumberBR(analysis.attackPower)}.`);
@@ -273,12 +298,17 @@ function chooseBossAction(boss: BossState, analysis?: PlayerActionAnalysis) {
       if (targets > 3 && (card.maxTargets || 1) >= 20) score += 36;
       if (targets > 50 && (card.maxTargets || 1) >= 100) score += 48;
       if (memory?.playerUsesClones && (card.maxTargets || 1) > 1) score += 16;
+      if (analysis?.protectedByClones && (card.maxTargets || 1) > 1) score += 18;
+      if (analysis?.flying && (card.targetShape === 'linha' || (card.maxTargets || 1) > 1)) score += 8;
+      if (analysis?.far && ['lanca-fragmentada-boss', 'onda-abismo-partido-boss', 'ruptura-vazio-menor-boss'].includes(card.id)) score += 10;
+      if (boss.turn >= 2 && (card.speed === 'instant' || Number(card.speed || 0) >= Number(analysis?.maxSpeed || 0))) score += 10;
       if ((memory?.threatScore || 0) > 10) score += 10;
       if (boss.stats.Ene < 250000) score -= Math.floor(cardCost(card) / 20000);
     }
     if (card.kind === 'movement') {
       score += 8;
       if (speed >= 4 || numeric(analysis?.attackPower) > 450000) score += 36;
+      if (analysis?.directHpThreat || analysis?.hybridEvasion) score += 20;
       if ((memory?.lastDamageTaken || 0) > 250000) score += 16;
       if (boss.turn % 3 === 0) score += 18;
     }
@@ -288,6 +318,7 @@ function chooseBossAction(boss: BossState, analysis?: PlayerActionAnalysis) {
       if (numeric(analysis?.attackPower) > 400000 && card.id === 'reflexo-abissal-boss') score += 20;
       if (hpRatio < 0.45) score += 18;
       if (memory?.playerUsesStrongMode) score += 8;
+      if (analysis?.directHpThreat && card.id === 'reflexo-abissal-boss') score += 14;
     }
     if (card.kind === 'mode' || card.kind === 'equipment' || card.kind === 'perception') {
       if ((boss.activeCardIds || []).includes(card.id)) score -= 100;
@@ -296,6 +327,7 @@ function chooseBossAction(boss: BossState, analysis?: PlayerActionAnalysis) {
       if (hpRatio < 0.55 && card.kind !== 'perception') score += 16;
       if (speed >= 4 && card.kind === 'perception') score += 24;
       if (memory?.playerUsesGenjutsu && card.kind === 'perception') score += 8;
+      if (analysis?.activeMode && card.kind === 'mode') score += 8;
     }
     if (card.kind === 'mental') {
       score += analysis?.isGenjutsu || memory?.playerUsesGenjutsu ? 32 : -20;
@@ -304,6 +336,26 @@ function chooseBossAction(boss: BossState, analysis?: PlayerActionAnalysis) {
   }).sort((a, b) => b.score - a.score || cardCost(a.card) - cardCost(b.card));
 
   return scored[0]?.card;
+}
+
+function dynamicBossLegend(action: BossCard, analysis?: PlayerActionAnalysis) {
+  const clones = (analysis?.cloneCount || 0) > 0;
+  const manyTargets = (analysis?.declaredTargets || 0) > 3;
+  const flying = !!analysis?.flying;
+  const far = !!analysis?.far;
+  const protectedByClones = !!analysis?.protectedByClones;
+  if (action.kind === 'movement') return `Uso ${action.name} para escapar da ofensiva e reposicionar meu corpo no campo.`;
+  if (action.kind === 'mode') return `Ativo ${action.name} para recuperar parte do meu poder selado.`;
+  if (action.kind === 'equipment') return `Ativo ${action.name} para reforçar minha defesa contra sua pressão.`;
+  if (action.kind === 'defense' || action.kind === 'mental' || action.kind === 'perception') return `Uso ${action.name} para responder à sua movimentação e manter o controle do campo.`;
+  if (action.id === 'corte-vazio-boss') return `Utilizo ${action.name} para rasgar sua defesa e atingir seu corpo diretamente.`;
+  if (action.id === 'lanca-fragmentada-boss') return `Utilizo ${action.name} para perfurar sua guarda e pressionar seu C.T.`;
+  if (action.id === 'chuva-estilhacos-rubros-boss' && clones) return `Utilizo ${action.name} para destruir essas cópias espalhadas pelo campo.`;
+  if (action.id === 'onda-abismo-partido-boss' && (manyTargets || protectedByClones)) return `Utilizo ${action.name} para varrer suas invocações e defesas do campo.`;
+  if (action.id === 'ruptura-vazio-menor-boss') return `Utilizo ${action.name} para consumir os alvos próximos em uma fenda dimensional.`;
+  if (flying) return `Utilizo ${action.name} mirando sua posição aérea antes que você se afaste.`;
+  if (far) return `Utilizo ${action.name} para alcançar sua distância e cortar sua rota de fuga.`;
+  return `Utilizo ${action.name} para pressionar seu C.T e forçar uma resposta imediata.`;
 }
 
 export function resolveBossAttack(
@@ -328,7 +380,7 @@ export function resolveBossAttack(
   const damage = action.kind === 'attack' ? Math.max(0, numeric(action.atk) - playerDef) : 0;
   const nextPlayerAttrs = { ...playerAttrs };
 
-  lines.push(`Kael’Zor usou ${action.name}.`);
+  lines.push(dynamicBossLegend(action, analysis));
   if (action.kind === 'attack') {
     lines.push(`Atk: ${formatNumberBR(action.atk)}. ${formatSpeed(action.speed) || 'Sem Speed'}.`);
     if (targets > 1) {

@@ -23,6 +23,19 @@ export type MovementType = 'avanço' | 'recuo' | 'esquiva' | 'aproximação' | '
 export type DiverseSummonType = 'clone' | 'grupo' | 'enxame' | 'constructo' | 'invocação menor' | 'objeto invocado';
 export type TargetShape = 'único' | 'área' | 'linha' | 'cone' | 'todos ao redor' | 'grupo';
 export type SensoryType = 'percepção' | 'detecção' | 'rastreamento' | 'leitura sensorial' | 'reação' | 'reação instantânea';
+export type BattleUseType =
+  | 'ataque'
+  | 'defesa'
+  | 'movimentação'
+  | 'esquiva'
+  | 'aproximação'
+  | 'recuo'
+  | 'reposicionamento'
+  | 'ataque + movimentação'
+  | 'ataque + esquiva'
+  | 'defesa + movimentação';
+export type CombatTargetKind = 'C.T principal' | 'Boss' | 'invocação' | 'clone' | 'arma' | 'barreira' | 'modo/buff' | 'grupo' | 'outro';
+export type FieldPosition = 'chão' | 'voando' | 'perto' | 'longe' | 'escondido/invisível' | 'rastreado' | 'outra dimensão' | 'protegido' | 'atrás de clones';
 
 export type BossStats = {
   Hp: number;
@@ -54,6 +67,26 @@ export type Card = {
   detectsPresence?: boolean;
   tracksTarget?: boolean;
   tracksMovement?: boolean;
+  battleUseType?: BattleUseType;
+  costTargetLabel?: string;
+  effectTargetLabel?: string;
+  combatTargetKind?: CombatTargetKind;
+  fieldPosition?: FieldPosition;
+  actualTargets?: number;
+  ignoresCTDefense?: boolean;
+  ignoresCommonDefense?: boolean;
+  directHpDamage?: boolean;
+  piercing?: boolean;
+  compatibleDefenseOnly?: boolean;
+  stoppedBySpecificDefense?: boolean;
+  compatibleDefenseNote?: string;
+  countsAsAttack?: boolean;
+  countsAsDefense?: boolean;
+  countsAsMovement?: boolean;
+  countsAsDodge?: boolean;
+  offensiveMovement?: boolean;
+  evasiveMovement?: boolean;
+  temporaryNote?: string;
   summonType?: DiverseSummonType;
   summonQuantity?: number;
   summonHpIndividual?: number;
