@@ -8,7 +8,7 @@ export function wsUrl(code: string): string {
   return `${u}/api/ws/${encodeURIComponent(code)}`;
 }
 
-export async function apiCreateRoom(turnMinutes: number, options: { matchType?: MatchType; bossMode?: boolean; bossDifficulty?: string } = {}): Promise<{ code: string; config?: any }> {
+export async function apiCreateRoom(turnMinutes: number, options: { matchType?: MatchType; bossMode?: boolean; bossDifficulty?: string; maxPlayers?: number } = {}): Promise<{ code: string; config?: any }> {
   const r = await fetch(`${BASE}/api/rooms`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

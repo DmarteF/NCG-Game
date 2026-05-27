@@ -143,6 +143,21 @@ export default function TeamOnlineBattle() {
       participantsRef.current = event.participants;
       setParticipants(event.participants);
       setMessages((items) => [...items, { id: uid(), team: 'system', turn, text: `${event.participant.name} entrou na sala.`, timestamp: Date.now() }]);
+      if (isLeader && started) {
+        relay({
+          action: 'sync_state',
+          sourceId: myId,
+          started,
+          ended,
+          currentTeam,
+          currentPlayerId,
+          turn,
+          bossState: bossStateRef.current,
+          pendingBossAttacks: pendingBossAttacksRef.current,
+          ctByPlayer: ctByPlayerRef.current,
+          messages,
+        });
+      }
     } else if (event.type === 'participant_left') {
       participantsRef.current = event.participants;
       setParticipants(event.participants);
@@ -216,12 +231,32 @@ export default function TeamOnlineBattle() {
         setMessages((items) => [...items, payload.message]);
         setCurrentTeam('team1');
         setCurrentPlayerId(payload.nextPlayerId || null);
+      } else if (payload.action === 'sync_state') {
+        setStarted(!!payload.started);
+        setEnded(!!payload.ended);
+        setCurrentTeam(payload.currentTeam || 'team1');
+        setCurrentPlayerId(payload.currentPlayerId || null);
+        setTurn(payload.turn || 1);
+        if (payload.bossState) {
+          bossStateRef.current = payload.bossState;
+          setBossState(payload.bossState);
+        }
+        if (payload.pendingBossAttacks) {
+          pendingBossAttacksRef.current = payload.pendingBossAttacks;
+          setPendingBossAttacks(payload.pendingBossAttacks);
+        }
+        if (payload.ctByPlayer) {
+          ctByPlayerRef.current = payload.ctByPlayer;
+          setCtByPlayer(payload.ctByPlayer);
+        }
+        if (payload.messages) setMessages(payload.messages);
       } else if (payload.action === 'battle_end') {
         finishBattle(payload.text, false);
       }
     } else if (event.type === 'error') {
       setConnStatus('error');
-      Alert.alert('Erro', event.message || 'Erro na sala.');
+      const message = event.code === 'full' ? 'Sala cheia. Você pode assistir como espectador.' : event.message || 'Erro na sala.';
+      Alert.alert(event.code === 'full' ? 'Sala cheia' : 'Erro', message);
     }
   };
 

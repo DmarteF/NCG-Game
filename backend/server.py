@@ -70,6 +70,8 @@ class RoomCreatePayload(BaseModel):
     turnMinutes: int = 20
     matchType: str = "1x1"
     bossMode: bool = False
+    bossDifficulty: str = "facil"
+    maxPlayers: Optional[int] = None
 
 
 def _max_players_for(match_type: str, boss_mode: bool = False) -> int:
@@ -97,7 +99,8 @@ class Room:
 
     def is_full(self) -> bool:
         if self.config.get("teamMode"):
-            return len(self.participants) >= int(self.config.get("maxPlayers", 2))
+            players = [p for p in self.participants.values() if (p.get("player") or {}).get("role") != "spectator"]
+            return len(players) >= int(self.config.get("maxPlayers", 2))
         return self.host_ws is not None and self.guest_ws is not None
 
     def opponent_ws(self, role: str) -> Optional[WebSocket]:
@@ -154,8 +157,9 @@ async def create_room(payload: RoomCreatePayload):
             "turnMinutes": payload.turnMinutes,
             "matchType": payload.matchType,
             "bossMode": payload.bossMode,
+            "bossDifficulty": payload.bossDifficulty,
             "teamMode": team_mode,
-            "maxPlayers": _max_players_for(payload.matchType, payload.bossMode),
+            "maxPlayers": payload.maxPlayers or _max_players_for(payload.matchType, payload.bossMode),
         })
     return {"code": code, "config": ROOMS[code].config}
 
@@ -202,7 +206,7 @@ async def room_ws(websocket: WebSocket, code: str):
 
         requested_role = msg.get("role")
         player = msg.get("player") or {}
-        if requested_role not in ("host", "guest", "player"):
+        if requested_role not in ("host", "guest", "player", "spectator"):
             await _safe_send(websocket, {"type": "error", "message": "Role inválido."})
             await websocket.close()
             return
@@ -213,13 +217,14 @@ async def room_ws(websocket: WebSocket, code: str):
                 await _safe_send(websocket, {"type": "error", "code": "not_found", "message": "Sala não encontrada."})
                 await websocket.close()
                 return
-            if requested_role == "player" or room.config.get("teamMode"):
+            if requested_role in ("player", "spectator") or room.config.get("teamMode"):
                 pid = str(player.get("id") or uuid.uuid4())
-                if pid not in room.participants and room.is_full():
+                if requested_role != "spectator" and pid not in room.participants and room.is_full():
                     await _safe_send(websocket, {"type": "error", "code": "full", "message": "Sala cheia."})
                     await websocket.close()
                     return
                 player["id"] = pid
+                player["role"] = "spectator" if requested_role == "spectator" else player.get("role", "player")
                 room.participants[pid] = {"ws": websocket, "player": player}
                 role = "player"
                 participant_id = pid

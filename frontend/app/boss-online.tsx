@@ -18,14 +18,17 @@ const labels: Record<BossDifficulty, string> = {
   dificil: 'Difícil',
   impossivel: 'Impossível',
 };
+const difficulties = Object.entries(labels) as [BossDifficulty, string][];
+const bossPlayersFor = (roomMatchType: MatchType) => roomMatchType === '3xBoss' ? 3 : 2;
 
 export default function BossOnlineLobby() {
   const router = useRouter();
   const { bossDifficulty, matchType: initialMatchType } = useLocalSearchParams<{ bossDifficulty?: BossDifficulty; matchType?: MatchType }>();
-  const difficulty = bossDifficulty || 'facil';
+  const initialDifficulty = bossDifficulty || 'facil';
   const lockedMatchType = initialMatchType === '2xBoss' || initialMatchType === '3xBoss' ? initialMatchType : undefined;
-  const [mode, setMode] = useState<'home' | 'create' | 'join'>(lockedMatchType ? 'create' : 'home');
+  const [mode, setMode] = useState<'home' | 'create' | 'join'>('home');
   const [matchType, setMatchType] = useState<MatchType>(lockedMatchType || '2xBoss');
+  const [difficulty, setDifficulty] = useState<BossDifficulty>(initialDifficulty);
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [errMsg, setErrMsg] = useState('');
@@ -61,7 +64,7 @@ export default function BossOnlineLobby() {
     setErrMsg('');
     try {
       setBusy(true);
-      const res = await apiCreateRoom(30, { matchType, bossMode: true, bossDifficulty: difficulty });
+      const res = await apiCreateRoom(30, { matchType, bossMode: true, bossDifficulty: difficulty, maxPlayers: bossPlayersFor(matchType) });
       setBusy(false);
       await goWithProfile('host', res.code);
     } catch (e: any) {
@@ -82,11 +85,18 @@ export default function BossOnlineLobby() {
       setBusy(false);
       const roomMatch = (info.config?.matchType || matchType) as MatchType;
       const roomDifficulty = ((info.config?.bossDifficulty || difficulty) as BossDifficulty);
-      if (info.full) return goWithProfile('spectator', c, roomMatch, roomDifficulty);
+      if (info.full) {
+        const fullMessage = 'Sala cheia. Você pode assistir como espectador.';
+        setErrMsg(fullMessage);
+        Alert.alert('Sala cheia', fullMessage);
+        return goWithProfile('spectator', c, roomMatch, roomDifficulty);
+      }
       await goWithProfile('guest', c, roomMatch, roomDifficulty);
     } catch (e: any) {
       setBusy(false);
-      const m = e?.message || 'Sala não encontrada.';
+      const m = String(e?.message || '').includes('Sala não encontrada')
+        ? 'Sala não encontrada. Verifique o código e tente novamente.'
+        : e?.message || 'Sala não encontrada. Verifique o código e tente novamente.';
       setErrMsg(m);
       Alert.alert('Erro', m);
     }
@@ -110,7 +120,7 @@ export default function BossOnlineLobby() {
 
   return (
     <Screen testID="boss-online-screen">
-      <Header title="Boss Online" onBack={() => mode === 'home' || lockedMatchType ? router.back() : setMode('home')} />
+      <Header title="Boss Online" onBack={() => mode === 'home' ? router.back() : setMode('home')} />
 
       <View style={styles.banner}>
         <Ionicons name="skull-outline" size={20} color={theme.colors.neon} />
@@ -122,6 +132,12 @@ export default function BossOnlineLobby() {
 
       {mode === 'home' ? (
         <View style={{ gap: 14, marginTop: 8 }}>
+          {lockedMatchType ? (
+            <View style={styles.lockedBox}>
+              <Text style={styles.lockedText}>{lockedMatchType} • {labels[difficulty]}</Text>
+              <Text style={styles.hint}>Você pode criar uma sala com esta configuração ou entrar em uma sala existente por código.</Text>
+            </View>
+          ) : null}
           <Button title="Criar Sala Boss" onPress={() => setMode('create')} testID="boss-online-create-mode-btn" />
           <Button title="Entrar em Sala Boss" variant="secondary" onPress={() => setMode('join')} testID="boss-online-join-mode-btn" />
           <Text style={styles.hint}>O líder gera a ação do Boss uma vez e a sala inteira recebe o mesmo card, cálculo e turno.</Text>
@@ -143,10 +159,16 @@ export default function BossOnlineLobby() {
               ))}
             </View>
           )}
-          {!lockedMatchType ? <Text style={styles.hint}>1xBoss é solo local. 2xBoss e 3xBoss usam sala online com Boss sincronizado. Tempo fixo: 30 min por turno.</Text> : null}
+          <Text style={styles.label}>Dificuldade</Text>
+          <View style={styles.row}>
+            {difficulties.map(([id, label]) => (
+              <Chip key={id} label={label} active={difficulty === id} onPress={() => setDifficulty(id)} testID={`boss-online-difficulty-${id}`} />
+            ))}
+          </View>
+          <Text style={styles.hint}>1xBoss é solo local. 2xBoss e 3xBoss usam sala online com Boss sincronizado. Tempo fixo: 30 min por turno.</Text>
           <Text style={styles.label}>Sala MxH</Text>
           <Button title="Gerar código da sala Boss" onPress={createRoom} loading={busy} testID="boss-online-create-btn" />
-          <Pressable onPress={() => lockedMatchType ? router.back() : setMode('home')} testID="boss-online-back-mode-btn"><Text style={styles.back}>Voltar</Text></Pressable>
+          <Pressable onPress={() => setMode('home')} testID="boss-online-back-mode-btn"><Text style={styles.back}>Voltar</Text></Pressable>
         </View>
       ) : null}
 
