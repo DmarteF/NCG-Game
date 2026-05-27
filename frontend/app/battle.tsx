@@ -36,7 +36,7 @@ const ctToBattleAttrs = (ct: CT): BattleAttrs => ({ ...emptyBattleAttrs(), ...ct
 const BOSS_DIFFICULTY_LABELS: Record<BossDifficulty, string> = { facil: 'Fácil', medio: 'Médio', dificil: 'Difícil', impossivel: 'Impossível' };
 const BOSS_DIFFICULTY_MAX_RANK: Record<BossDifficulty, CardRank> = { facil: 'B', medio: 'A', dificil: 'S', impossivel: 'S' };
 const rankAllowedForBossDifficulty = (difficulty: BossDifficulty, rank: Rank | CardRank) => CARD_RANK_ORDER[rank as CardRank] <= CARD_RANK_ORDER[BOSS_DIFFICULTY_MAX_RANK[difficulty]];
-const bossDifficultyWarning = (difficulty: BossDifficulty) => `Esta dificuldade permite apenas C.T até Rank ${BOSS_DIFFICULTY_MAX_RANK[difficulty]}. Rank SS é exclusivo do Boss.`;
+const bossDifficultyWarning = (difficulty: BossDifficulty) => `Esta dificuldade permite apenas C.T até Rank ${BOSS_DIFFICULTY_MAX_RANK[difficulty]}. Rank SS é exclusivo do Boss. Jogadores podem usar no máximo Rank S.`;
 const numericAttr = (value: number | 'ilimitado' | undefined) => typeof value === 'number' && Number.isFinite(value) ? value : 0;
 const PLAY_USE_TYPES: BattleUseType[] = SIMPLE_BATTLE_USES;
 const TARGET_SHAPES: TargetShape[] = SIMPLE_TARGET_SHAPES;
@@ -141,7 +141,7 @@ export default function Battle() {
       const maxRank = BOSS_DIFFICULTY_MAX_RANK[difficulty];
       if (!rankAllowedForBossDifficulty(difficulty, initCT1.rank)) {
         setInitCT1(null);
-        Alert.alert('Dificuldade inválida', `Esta dificuldade permite apenas C.T até Rank ${maxRank}. Rank SS é exclusivo do Boss.`);
+        Alert.alert('Dificuldade inválida', `Esta dificuldade permite apenas C.T até Rank ${maxRank}. Rank SS é exclusivo do Boss. Jogadores podem usar no máximo Rank S.`);
         return;
       }
       const freshBoss = createKaelzorState(difficulty);
@@ -283,9 +283,9 @@ export default function Battle() {
     const bossExtra = attack.card?.kind === 'attack' || attack.card?.kind === 'charge'
       ? `ENE restante: ${formatNumberBR(attack.boss.stats.Ene)}\nDano possível: ${formatNumberBR(attack.damagePossible)}${targetHitExtra}\nAguardando resposta do jogador.`
       : `ENE restante: ${formatNumberBR(attack.boss.stats.Ene)}\nAguardando resposta do jogador.`;
-    const bossCard = attack.card
-      ? bossCardToSnapshot(attack.card, bossExtra)
-      : undefined;
+    const bossCards = (attack.cards?.length ? attack.cards : attack.card ? [attack.card] : [])
+      .map(card => bossCardToSnapshot(card, card.id === attack.card?.id ? bossExtra : `ENE restante: ${formatNumberBR(attack.boss.stats.Ene)}`));
+    const bossCard = bossCards.find(card => card.id === attack.card?.id);
     if ((attack.card?.kind === 'attack' || attack.card?.kind === 'charge') && bossCard && attack.damagePossible > 0) {
       const costText = Object.entries(attack.card.cost || {}).map(([attr, value]) => `${attr}: ${formatNumberBR(value)}`).join(' • ');
       setPendingBossAttack({
@@ -308,7 +308,7 @@ export default function Battle() {
       team: 'team2',
       text: attack.lines.join('\n'),
       timestamp: Date.now(),
-      playedCards: bossCard ? [{ cardSnapshot: bossCard }] : undefined,
+      playedCards: bossCards.length ? bossCards.map(cardSnapshot => ({ cardSnapshot })) : undefined,
       ctSnapshot: nextBossCT,
       finalAttrs: ctToBattleAttrs(nextBossCT),
     };
@@ -939,7 +939,7 @@ function entityFromCard(card: Card): BattleEntity {
 }
 
 // ====== Play Modal ======
-function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], bossDifficulty, onImagePress, onConfirm }:
+export function PlayModal({ visible, onClose, cards, activeCT, activeEffects = [], bossDifficulty, onImagePress, onConfirm }:
   { visible: boolean; onClose: () => void; cards: Card[]; activeCT: CT | null; activeEffects?: ActiveEffect[]; bossDifficulty?: BossDifficulty;
     onImagePress: (uri: string) => void;
     onConfirm: (p: PlayedCard[], ct: CT, obs: string, finalAttrs: Record<Attr, number | 'ilimitado'>, keptActiveEffectIds: string[], activeEntity?: BattleEntity, finalEntityAttrs?: Record<Attr, number | 'ilimitado'>, momentaryActions?: MomentaryAction[]) => void }) {

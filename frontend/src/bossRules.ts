@@ -1,6 +1,6 @@
 import { Attr } from './theme';
 import { formatNumberBR, formatSpeed } from './format';
-import { BossCard, BossState, KAELZOR_BOSS_CARDS, bossCard } from './bossData';
+import { BossCard, BossCardKind, BossState, KAELZOR_BOSS_CARDS, bossCard } from './bossData';
 import { Card, CT, MomentaryAction, PlayedCard } from './types';
 import { cardUses, ignoresCTAndModeDefense, ignoresCTDefense, normalizeTargetShape } from './normalize';
 
@@ -41,6 +41,7 @@ export type BossDefenseResult = {
 export type BossAttackResult = {
   boss: BossState;
   card?: BossCard;
+  cards?: BossCard[];
   playerAttrs: Record<Attr, number | 'ilimitado'>;
   damagePossible: number;
   defeatedPlayer: boolean;
@@ -204,8 +205,10 @@ function canPay(card: BossCard, boss: BossState) {
   return boss.stats.Ene >= ene && boss.stats.Ag >= ag && (boss.cooldowns[card.id] || 0) <= 0;
 }
 
-function pay(card: BossCard, boss: BossState): BossState {
-  const cooldowns = Object.fromEntries(Object.entries(boss.cooldowns).map(([id, value]) => [id, Math.max(0, value - 1)]));
+function pay(card: BossCard, boss: BossState, tickCooldowns = true): BossState {
+  const cooldowns = tickCooldowns
+    ? Object.fromEntries(Object.entries(boss.cooldowns).map(([id, value]) => [id, Math.max(0, value - 1)]))
+    : boss.cooldowns;
   const activates = ['mode', 'equipment', 'perception'].includes(card.kind);
   const currentActive = boss.activeCardIds || [];
   const alreadyActive = currentActive.includes(card.id);
@@ -347,19 +350,25 @@ function mandatoryModeForTurn(boss: BossState) {
   return undefined;
 }
 
-function chooseBossAction(boss: BossState, analysis?: PlayerActionAnalysis) {
+function chooseBossAction(
+  boss: BossState,
+  analysis?: PlayerActionAnalysis,
+  options: { kind?: BossCardKind | BossCardKind[]; excludeIds?: string[] } = {},
+) {
   if (boss.pendingTechniqueId) {
     const pending = bossCard(boss.pendingTechniqueId);
-    if (pending) return pending;
+    if (pending && (!options.kind || [options.kind].flat().includes(pending.kind))) return pending;
   }
   const mandatoryMode = mandatoryModeForTurn(boss);
-  if (mandatoryMode && canPay(mandatoryMode, boss)) return mandatoryMode;
+  if (mandatoryMode && canPay(mandatoryMode, boss) && (!options.kind || [options.kind].flat().includes(mandatoryMode.kind))) return mandatoryMode;
 
   const targets = Math.max(1, analysis?.cloneCount || analysis?.declaredTargets || 1);
   const hpRatio = boss.stats.Hp / 500000;
   const memory = boss.bossMemory;
   const speed = analysis?.maxSpeed === 'instant' ? 99 : analysis?.maxSpeed || 0;
-  const available = KAELZOR_BOSS_CARDS.filter(card => bossCanUseCard(card, boss));
+  const kinds = options.kind ? [options.kind].flat() : undefined;
+  const excluded = new Set(options.excludeIds || []);
+  const available = KAELZOR_BOSS_CARDS.filter(card => bossCanUseCard(card, boss) && !excluded.has(card.id) && (!kinds || kinds.includes(card.kind)));
   if (available.length === 0) return undefined;
 
   const scored = available.map((card) => {
@@ -420,7 +429,45 @@ function chooseBossAction(boss: BossState, analysis?: PlayerActionAnalysis) {
   return scored[0]?.card;
 }
 
-function dynamicBossLegend(action: BossCard, analysis?: PlayerActionAnalysis) {
+function buildBossActionPlan(boss: BossState, analysis?: PlayerActionAnalysis) {
+  const actions: BossCard[] = [];
+  let nextBoss = boss;
+  const add = (card?: BossCard) => {
+    if (!card || actions.some(action => action.id === card.id) || !canPay(card, nextBoss)) return undefined;
+    actions.push(card);
+    nextBoss = pay(card, { ...nextBoss, lastAttackId: card.kind === 'attack' || card.kind === 'charge' ? card.id : nextBoss.lastAttackId }, actions.length === 0);
+    return card;
+  };
+
+  if (boss.pendingTechniqueId) {
+    const pending = bossCard(boss.pendingTechniqueId);
+    if (pending) {
+      actions.push(pending);
+      return { actions, boss: { ...boss, pendingTechniqueId: undefined, lastAttackId: pending.id } };
+    }
+  }
+
+  add(mandatoryModeForTurn(nextBoss));
+
+  const needsReaction = !!analysis && (analysis.maxSpeed === 'instant' || Number(analysis.maxSpeed || 0) >= 4 || analysis.directHpThreat || analysis.isGenjutsu);
+  if (needsReaction) add(chooseBossAction(nextBoss, analysis, { kind: ['perception', 'mental'], excludeIds: actions.map(action => action.id) }));
+
+  const shouldMove = !!analysis && (analysis.directHpThreat || analysis.hybridEvasion || analysis.far || (nextBoss.bossMemory?.lastDamageTaken || 0) > 250000 || nextBoss.turn % 3 === 0);
+  if (shouldMove) add(chooseBossAction(nextBoss, analysis, { kind: 'movement', excludeIds: actions.map(action => action.id) }));
+
+  const shouldDefend = !!analysis && (analysis.isAttack || analysis.isGenjutsu || analysis.isSealing) && (analysis.attackPower > 0 || analysis.directHpThreat || analysis.maxSpeed === 'instant');
+  if (shouldDefend) add(chooseBossAction(nextBoss, analysis, { kind: ['defense', 'mental'], excludeIds: actions.map(action => action.id) }));
+
+  add(chooseBossAction(nextBoss, analysis, { kind: ['attack', 'charge'], excludeIds: actions.map(action => action.id) }));
+
+  if (actions.length === 0) {
+    add(chooseBossAction(nextBoss, analysis, { excludeIds: actions.map(action => action.id) }));
+  }
+
+  return { actions, boss: nextBoss };
+}
+
+function dynamicBossLegend(action: BossCard, analysis?: PlayerActionAnalysis, actions: BossCard[] = [action]) {
   const clones = (analysis?.cloneCount || 0) > 0;
   const manyTargets = (analysis?.declaredTargets || 0) > 3;
   const flying = !!analysis?.flying;
@@ -481,7 +528,7 @@ function dynamicBossLegend(action: BossCard, analysis?: PlayerActionAnalysis) {
     'Seu corpo ainda está preso ao mundo... vou corrigir isso.',
     'Uma única lâmina basta para separar você da vida.',
   ]);
-  return `Fala do Boss:\n"${speech}"\nCard: ${action.name}`;
+  return `Fala do Boss:\n"${speech}"\nCards usados:\n${actions.map(item => `- ${item.name}`).join('\n')}`;
 }
 
 export function resolveBossAttack(
@@ -491,19 +538,19 @@ export function resolveBossAttack(
   analysis?: PlayerActionAnalysis,
 ): BossAttackResult {
   const lines: string[] = [];
-  const action = chooseBossAction(boss, analysis);
+  const plan = buildBossActionPlan(boss, analysis);
+  const actions = plan.actions;
+  const action = actions.find(card => card.kind === 'attack' || card.kind === 'charge') || actions[actions.length - 1];
   if (!action) {
     lines.push('Kael’Zor não encontrou ENE/AG suficiente para agir neste turno.');
     lines.push('Aguardando resposta do jogador.');
-    return { boss: { ...boss, turn: boss.turn + 1 }, playerAttrs, damagePossible: 0, defeatedPlayer: false, lines };
+    return { boss: { ...boss, turn: boss.turn + 1 }, cards: [], playerAttrs, damagePossible: 0, defeatedPlayer: false, lines };
   }
   const resolvingPending = !!boss.pendingTechniqueId && boss.pendingTechniqueId === action.id;
   const startingCharge = action.kind === 'charge' && !resolvingPending;
   const targets = Math.max(1, analysis?.cloneCount || analysis?.declaredTargets || 1);
   const hitTargets = Math.min(targets, action.maxTargets || 1);
-  let nextBoss = resolvingPending
-    ? { ...boss, pendingTechniqueId: undefined, lastAttackId: action.id }
-    : pay(action, { ...boss, lastAttackId: action.id });
+  let nextBoss = plan.boss;
   if (startingCharge) nextBoss = { ...nextBoss, pendingTechniqueId: action.id };
   nextBoss = { ...nextBoss, turn: boss.turn + 1 };
 
@@ -511,7 +558,15 @@ export function resolveBossAttack(
   const damage = action.kind === 'attack' || resolvingPending ? Math.max(0, numeric(action.atk) - playerDef) : 0;
   const nextPlayerAttrs = { ...playerAttrs };
 
-  lines.push(dynamicBossLegend(action, analysis));
+  lines.push(dynamicBossLegend(action, analysis, actions));
+  const supportActions = actions.filter(item => item.id !== action.id);
+  supportActions.forEach((item) => {
+    if (item.kind === 'mode') lines.push(`${item.name}: modo ativo no Boss. Bônus somado uma única vez e ranks superiores liberados conforme a dificuldade.`);
+    else if (item.kind === 'movement') lines.push(`${item.name}: ${item.movementType || 'reposicionamento'} (${item.movementRange || 'alcance indefinido'}).`);
+    else if (item.kind === 'defense' || item.kind === 'mental') lines.push(`${item.name}: defesa/reação preparada${item.def ? ` (${formatNumberBR(item.def)})` : ''}.`);
+    else if (item.kind === 'perception') lines.push(`${item.name}: percepção/reação mantida.`);
+    else if (item.kind === 'equipment') lines.push(`${item.name}: equipamento ativo no Boss.`);
+  });
   if (startingCharge) {
     lines.push(`${action.name} está carregando. A estrela dimensional ainda não explodiu.`);
     lines.push('Jogadores podem responder antes da explosão: fugir da área, levantar defesa coletiva, interromper canalização, selar, aprisionar ou bloquear o espaço.');
@@ -534,5 +589,8 @@ export function resolveBossAttack(
   }
   lines.push(`ENE restante do Boss: ${formatNumberBR(nextBoss.stats.Ene)}.`);
   lines.push('Aguardando resposta do jogador. Nenhuma vitória automática foi aplicada.');
-  return { boss: nextBoss, card: action, playerAttrs: nextPlayerAttrs, damagePossible: damage, defeatedPlayer: false, lines };
+  lines.push(`Status do Boss: HP ${formatNumberBR(nextBoss.stats.Hp)} • ATK ${formatNumberBR(nextBoss.stats.Atk)} • DEF ${formatNumberBR(nextBoss.stats.Def)} • AG ${formatNumberBR(nextBoss.stats.Ag)} • ENE ${formatNumberBR(nextBoss.stats.Ene)}.`);
+  const activeModes = (nextBoss.activeCardIds || []).map(id => bossCard(id)?.name).filter(Boolean).join(', ');
+  if (activeModes) lines.push(`C.T/Forma atual: ${nextBoss.name} — ${activeModes}.`);
+  return { boss: nextBoss, card: action, cards: actions, playerAttrs: nextPlayerAttrs, damagePossible: damage, defeatedPlayer: false, lines };
 }

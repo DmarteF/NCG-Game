@@ -192,9 +192,14 @@ export function createKaelzorState(difficulty: BossDifficulty = 'facil'): BossSt
 }
 
 export function createBossCT(state: BossState): CT {
+  const currentFormId = [...(state.activeCardIds || [])].reverse().find(id => {
+    const card = bossCard(id);
+    return card?.kind === 'mode';
+  });
+  const currentForm = currentFormId ? bossCard(currentFormId)?.name : state.title;
   return {
     id: 'kaelzor-fragmento-boss',
-    name: `${state.name} — ${state.title}`,
+    name: `${state.name} — ${currentForm || state.title}`,
     rank: state.rank,
     image: BOSS_CT_IMAGE,
     attrs: {

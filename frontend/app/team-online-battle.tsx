@@ -1,18 +1,18 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import Screen from '../src/components/Screen';
 import Button from '../src/components/Button';
 import Input from '../src/components/Input';
 import ZoomableImageModal from '../src/components/ZoomableImageModal';
-import { resolveCombat } from '../src/combat';
 import { ctDisplayName, formatNumberBR, formatSpeed } from '../src/format';
 import { TeamParticipant, TeamRoomClient, TeamWSEvent } from '../src/online';
 import { withRemoteImageCard, withRemoteImageCT } from '../src/remoteImages';
 import { Storage, uid } from '../src/storage';
 import { ATTRS, Attr, CARD_RANK_ORDER, CardRank, theme } from '../src/theme';
-import { BossDifficulty, Card, CT, MatchType, PlayedCard } from '../src/types';
+import { BattleEntity, BossDifficulty, Card, CT, MatchType, MomentaryAction, PlayedCard } from '../src/types';
 import { Header } from './profile';
+import { PlayModal } from './battle';
 import { BossState, bossCardToSnapshot, createBossCT, createKaelzorState } from '../src/bossData';
 import { PlayerActionAnalysis, resolveBossAttack, resolveBossDefense } from '../src/bossRules';
 import { calculationDetailsFor } from '../src/historyExport';
@@ -229,7 +229,7 @@ export default function TeamOnlineBattle() {
     if (bossMode) {
       const maxRank = bossMaxRank[bossDifficulty];
       if (CARD_RANK_ORDER[ct.rank as CardRank] > CARD_RANK_ORDER[maxRank]) {
-        Alert.alert('Dificuldade inválida', `Esta dificuldade permite apenas C.T até Rank ${maxRank}. Rank SS é exclusivo do Boss.`);
+        Alert.alert('Dificuldade inválida', `Esta dificuldade permite apenas C.T até Rank ${maxRank}. Rank SS é exclusivo do Boss. Jogadores podem usar no máximo Rank S.`);
         if (myCT?.id === ct.id) setMyCT(null);
         return;
       }
@@ -263,7 +263,7 @@ export default function TeamOnlineBattle() {
     if (bossMode) {
       const maxRank = bossMaxRank[bossDifficulty];
       const invalid = players.find(p => CARD_RANK_ORDER[(ctByPlayer[p.id]?.rank || 'E') as CardRank] > CARD_RANK_ORDER[maxRank]);
-      if (invalid) return Alert.alert('Dificuldade inválida', `${invalid.name} precisa trocar o C.T. Esta dificuldade permite apenas C.T até Rank ${maxRank}. Rank SS é exclusivo do Boss.`);
+      if (invalid) return Alert.alert('Dificuldade inválida', `${invalid.name} precisa trocar o C.T. Esta dificuldade permite apenas C.T até Rank ${maxRank}. Rank SS é exclusivo do Boss. Jogadores podem usar no máximo Rank S.`);
     }
     const starter = pickStarter();
     const freshBoss = createKaelzorState(bossDifficulty);
@@ -336,8 +336,18 @@ export default function TeamOnlineBattle() {
     setTurn((value) => value + 1);
   };
 
-  const sendPlay = async (selectedCards: Card[], observation: string) => {
+  const sendPlay = async (
+    playedCards: PlayedCard[],
+    ctSnap: CT,
+    observation: string,
+    finalAttrs: Record<Attr, number | 'ilimitado'>,
+    _keptActiveEffectIds: string[] = [],
+    _activeEntity?: BattleEntity,
+    _finalEntityAttrs?: Record<Attr, number | 'ilimitado'>,
+    momentaryActions: MomentaryAction[] = [],
+  ) => {
     if (!myCT || !canAct() || !enforceCooldown()) return;
+    const selectedCards = playedCards.map(item => item.cardSnapshot);
     const text = `${observation} ${selectedCards.map(card => `${card.name} ${card.caption}`).join(' ')}`.toLowerCase();
     const hasForbiddenFirstTurn = turn === 1 && (
       selectedCards.some(card => Object.values(card.unlimited || {}).some(Boolean))
@@ -355,13 +365,12 @@ export default function TeamOnlineBattle() {
       const invalidCard = selectedCards.find(card => CARD_RANK_ORDER[card.rank as CardRank] > CARD_RANK_ORDER[maxRank]);
       if (invalidCard) return Alert.alert('Dificuldade inválida', invalidCard.rank === 'SS' ? 'Rank SS é exclusivo do Boss. Jogadores podem usar no máximo Rank S.' : `${invalidCard.name} está acima do Rank ${maxRank}.`);
     }
-    const resolved = resolveCombat(myCT, undefined, selectedCards, []);
     const numericAttrs = ATTRS.reduce((acc, attr) => {
-      const value = resolved.finalAttrs[attr];
+      const value = finalAttrs[attr];
       acc[attr] = typeof value === 'number' ? value : (myCT.attrs[attr] || 0);
       return acc;
     }, {} as Record<Attr, number>);
-    const nextCT = { ...myCT, attrs: numericAttrs };
+    const nextCT = { ...ctSnap, attrs: numericAttrs };
     setMyCT(nextCT);
     setCtByPlayer((map) => {
       const next = { ...map, [myId]: nextCT };
@@ -373,21 +382,21 @@ export default function TeamOnlineBattle() {
     let nextBoss = bossStateRef.current;
     let nextPending = { ...pendingBossAttacksRef.current };
     let finalCT = nextCT;
-    let finalAttrs = resolved.finalAttrs;
+    let resolvedFinalAttrs = finalAttrs;
     let endText = '';
     if (bossMode) {
       const pending = nextPending[myId];
       if (pending) {
-        const pendingResult = resolveOnlinePendingBossAttack(pending, selectedCards, observation, resolved.finalAttrs);
-        finalAttrs = pendingResult.nextAttrs;
-        finalCT = { ...nextCT, attrs: ATTRS.reduce((acc, attr) => ({ ...acc, [attr]: typeof finalAttrs[attr] === 'number' ? finalAttrs[attr] as number : nextCT.attrs[attr] || 0 }), {} as Record<Attr, number>) };
+        const pendingResult = resolveOnlinePendingBossAttack(pending, selectedCards, observation, resolvedFinalAttrs);
+        resolvedFinalAttrs = pendingResult.nextAttrs;
+        finalCT = { ...nextCT, attrs: ATTRS.reduce((acc, attr) => ({ ...acc, [attr]: typeof resolvedFinalAttrs[attr] === 'number' ? resolvedFinalAttrs[attr] as number : nextCT.attrs[attr] || 0 }), {} as Record<Attr, number>) };
         delete nextPending[myId];
         extraMessages.push(pendingResult.message);
         const updatedMap = { ...ctByPlayerRef.current, [myId]: finalCT };
         if (pendingResult.defeated && allBossPlayersDefeated(updatedMap, participantsRef.current)) endText = 'Kael’Zor venceu.';
       }
       if (!endText) {
-        const bossDefense = resolveBossDefense(nextBoss, selectedCards.map(card => ({ cardSnapshot: card })), observation, finalAttrs, resolved.momentaryActions);
+        const bossDefense = resolveBossDefense(nextBoss, selectedCards.map(card => ({ cardSnapshot: card })), observation, resolvedFinalAttrs, momentaryActions);
         nextBoss = bossDefense.boss;
         const bossCT = createBossCT(nextBoss);
         const defenseExtra = `ENE restante: ${formatNumberBR(nextBoss.stats.Ene)}\nDano recebido: ${formatNumberBR(bossDefense.damageTaken)}\nHP restante do Boss: ${formatNumberBR(nextBoss.stats.Hp)}`;
@@ -417,10 +426,10 @@ export default function TeamOnlineBattle() {
       ctByPlayerRef.current = next;
       return next;
     });
-    const msg: TeamMsg = { id: uid(), team: myTeam, player: me.name, turn, playedCards: selectedCards.map(card => ({ cardSnapshot: card })), ctSnapshot: finalCT, finalAttrs, text: observation, timestamp: Date.now() };
+    const msg: TeamMsg = { id: uid(), team: myTeam, player: me.name, turn, playedCards: selectedCards.map(card => ({ cardSnapshot: card })), ctSnapshot: finalCT, finalAttrs: resolvedFinalAttrs, text: observation, timestamp: Date.now() };
     msg.calculationDetails = calculationDetailsFor(msg);
     setMessages((items) => [...items, msg, ...extraMessages]);
-    relay({ action: 'play', sourceId: myId, team: myTeam, playerId: myId, playerName: me.name, turn, cards: played, ct: await withRemoteImageCT(finalCT), finalAttrs, observation, calculationDetails: msg.calculationDetails, extraMessages, bossState: nextBoss, pendingBossAttacks: nextPending, endText });
+    relay({ action: 'play', sourceId: myId, team: myTeam, playerId: myId, playerName: me.name, turn, cards: played, ct: await withRemoteImageCT(finalCT), finalAttrs: resolvedFinalAttrs, observation, calculationDetails: msg.calculationDetails, extraMessages, bossState: nextBoss, pendingBossAttacks: nextPending, endText });
     setPlayOpen(false);
     if (endText) finishBattle(endText);
     else advanceAfter(myTeam, myId);
@@ -529,7 +538,9 @@ export default function TeamOnlineBattle() {
     const bossExtra = attack.card?.kind === 'attack' || attack.card?.kind === 'charge'
       ? `ATK base do card: ${formatNumberBR(attack.card.atk)}\nATK final: ${formatNumberBR(attack.card.atk)}\nENE restante: ${formatNumberBR(nextBoss.stats.Ene)}\nDano possível: ${formatNumberBR(attack.damagePossible)}\nAguardando resposta do jogador.`
       : `ENE restante: ${formatNumberBR(nextBoss.stats.Ene)}\nAguardando resposta do jogador.`;
-    const bossCard = attack.card ? bossCardToSnapshot(attack.card, bossExtra) : undefined;
+    const bossCards = (attack.cards?.length ? attack.cards : attack.card ? [attack.card] : [])
+      .map(card => bossCardToSnapshot(card, card.id === attack.card?.id ? bossExtra : `ENE restante: ${formatNumberBR(nextBoss.stats.Ene)}`));
+    const bossCard = bossCards.find(card => card.id === attack.card?.id);
     const targets = attack.card?.kind === 'attack' || attack.card?.kind === 'charge'
       ? chooseBossTargets(alive, ctMap, attack.card.maxTargets || 1)
       : [];
@@ -555,12 +566,12 @@ export default function TeamOnlineBattle() {
       team: 'team2',
       turn: bossTurn,
       text: attack.lines.join('\n'),
-      playedCards: bossCard ? [{ cardSnapshot: await withRemoteImageCard(bossCard) }] : undefined,
+      playedCards: bossCards.length ? await Promise.all(bossCards.map(async cardSnapshot => ({ cardSnapshot: await withRemoteImageCard(cardSnapshot) }))) : undefined,
       ctSnapshot: await withRemoteImageCT(bossCT),
       finalAttrs: ctToOnlineAttrs(bossCT),
       timestamp: Date.now(),
     };
-    msg.calculationDetails = calculationDetailsFor({ playedCards: bossCard ? [{ cardSnapshot: bossCard }] : undefined, ctSnapshot: bossCT, finalAttrs: msg.finalAttrs });
+    msg.calculationDetails = calculationDetailsFor({ playedCards: bossCards.length ? bossCards.map(cardSnapshot => ({ cardSnapshot })) : undefined, ctSnapshot: bossCT, finalAttrs: msg.finalAttrs });
     bossStateRef.current = nextBoss;
     pendingBossAttacksRef.current = nextPending;
     setBossState(nextBoss);
@@ -705,10 +716,14 @@ export default function TeamOnlineBattle() {
         <Button title="Jogar" onPress={() => setPlayOpen(true)} disabled={!canAct()} style={{ flex: 1 }} small testID="team-play-btn" />
         <Button title="Passar" variant="ghost" onPress={sendPass} disabled={!canAct()} small testID="team-pass-btn" />
       </View>
-      <TeamPlayModal
+      <PlayModal
         visible={playOpen}
         cards={bossMode ? cards.filter(card => CARD_RANK_ORDER[card.rank as CardRank] <= CARD_RANK_ORDER[bossMaxRank[bossDifficulty]]) : cards}
         onClose={() => setPlayOpen(false)}
+        activeCT={myCT}
+        activeEffects={[]}
+        bossDifficulty={bossMode ? bossDifficulty : undefined}
+        onImagePress={setZoomImage}
         onConfirm={sendPlay}
       />
       <ZoomableImageModal uri={zoomImage} onClose={() => setZoomImage(null)} />
@@ -741,7 +756,16 @@ function TeamMessage({ item, onImagePress }: { item: TeamMsg; onImagePress: (uri
           </View>
         </View>
       ))}
-      {item.finalAttrs ? <Text style={styles.small}>Final: {ATTRS.map(attr => `${attr}:${formatNumberBR(item.finalAttrs?.[attr])}`).join(' • ')}</Text> : null}
+      {item.ctSnapshot ? (
+        <View style={styles.ctSnapshotBox}>
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+            {item.ctSnapshot.image ? <Pressable onPress={() => onImagePress(item.ctSnapshot!.image!)}><Image source={{ uri: item.ctSnapshot.image }} style={styles.cardImg} /></Pressable> : null}
+            <Text style={styles.cardName}>{ctDisplayName(item.ctSnapshot)} • Rank {item.ctSnapshot.rank}</Text>
+          </View>
+          {item.finalAttrs ? <Text style={styles.small}>{ATTRS.map(attr => `${attr}:${formatNumberBR(item.finalAttrs?.[attr])}`).join(' • ')}</Text> : null}
+          {item.ctSnapshot.resourceName ? <Text style={styles.small}>{item.ctSnapshot.resourceName}: {formatNumberBR(item.ctSnapshot.resourceValue || 0)}</Text> : null}
+        </View>
+      ) : item.finalAttrs ? <Text style={styles.small}>Final: {ATTRS.map(attr => `${attr}:${formatNumberBR(item.finalAttrs?.[attr])}`).join(' • ')}</Text> : null}
       {item.calculationDetails?.length ? (
         <>
           <Pressable onPress={() => setShowCalc(value => !value)} style={styles.calcButton}>
@@ -755,50 +779,6 @@ function TeamMessage({ item, onImagePress }: { item: TeamMsg; onImagePress: (uri
         </>
       ) : null}
     </View>
-  );
-}
-
-function TeamPlayModal({ visible, cards, onClose, onConfirm }: { visible: boolean; cards: Card[]; onClose: () => void; onConfirm: (cards: Card[], observation: string) => void }) {
-  const [selected, setSelected] = useState<Card[]>([]);
-  const [query, setQuery] = useState('');
-  const [observation, setObservation] = useState('');
-  useEffect(() => {
-    if (visible) {
-      setSelected([]);
-      setQuery('');
-      setObservation('');
-    }
-  }, [visible]);
-  const visibleCards = cards.filter(card => {
-    const q = query.trim().toLowerCase();
-    return !q || `${card.name} ${card.caption} ${card.rank} ${card.cardType || ''} ${card.actionType || ''} ${card.movementType || ''} ${card.movementRange || ''} ${card.summonType || ''} ${card.targetShape || ''} ${card.sensoryType || ''} ${card.detectsInvisibility ? 'detecta invisibilidade' : ''} ${card.detectsChakra ? 'detecta chakra energia' : ''} ${card.detectsPresence ? 'detecta presença' : ''} ${card.tracksTarget ? 'rastreia alvo' : ''} ${card.tracksMovement ? 'rastreia movimento' : ''} ${formatSpeed(card.speed)}`.toLowerCase().includes(q);
-  });
-  const toggle = (card: Card) => setSelected(items => items.some(item => item.id === card.id) ? items.filter(item => item.id !== card.id) : [...items, card]);
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalWrap}>
-        <View style={styles.modalCard}>
-          <Text style={styles.modalTitle}>Jogada da equipe</Text>
-          <Input label="Buscar card" value={query} onChangeText={setQuery} placeholder="Nome, legenda ou Speed" testID="team-card-search" />
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 8, paddingVertical: 8 }}>
-            {visibleCards.map(card => {
-              const active = selected.some(item => item.id === card.id);
-              return (
-                <Pressable key={card.id} onPress={() => toggle(card)} style={[styles.pickCard, active && styles.pickCardActive]}>
-                  <Text style={styles.cardName}>{card.name} • Rank {card.rank}</Text>
-                  <Text style={styles.small}>{[formatSpeed(card.speed), card.caption].filter(Boolean).join(' • ')}</Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-          <Input label="Observação" value={observation} onChangeText={setObservation} placeholder="Descreva alvos, clones, defesa..." multiline numberOfLines={3} style={{ minHeight: 70, textAlignVertical: 'top' }} />
-          <View style={styles.modalActions}>
-            <Button title="Cancelar" variant="ghost" onPress={onClose} small />
-            <Button title="Enviar" onPress={() => onConfirm(selected, observation)} small />
-          </View>
-        </View>
-      </View>
-    </Modal>
   );
 }
 
@@ -847,6 +827,7 @@ const styles = StyleSheet.create({
   bubbleHead: { color: theme.colors.neon, fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
   bubbleText: { color: '#fff', fontSize: 13, lineHeight: 18 },
   playedCard: { flexDirection: 'row', gap: 8, backgroundColor: 'rgba(0,0,0,0.22)', borderRadius: 8, padding: 6 },
+  ctSnapshotBox: { gap: 5, backgroundColor: 'rgba(255,215,0,0.06)', borderRadius: 8, borderWidth: 1, borderColor: 'rgba(255,215,0,0.22)', padding: 8 },
   cardImg: { width: 42, height: 42, borderRadius: 8, backgroundColor: theme.colors.bg },
   cardName: { color: '#fff', fontWeight: '800', fontSize: 12 },
   calcButton: { alignSelf: 'flex-start', borderRadius: 8, borderWidth: 1, borderColor: theme.colors.borderActive, paddingHorizontal: 10, paddingVertical: 6, marginTop: 4 },

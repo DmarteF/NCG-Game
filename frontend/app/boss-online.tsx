@@ -23,8 +23,9 @@ export default function BossOnlineLobby() {
   const router = useRouter();
   const { bossDifficulty, matchType: initialMatchType } = useLocalSearchParams<{ bossDifficulty?: BossDifficulty; matchType?: MatchType }>();
   const difficulty = bossDifficulty || 'facil';
-  const [mode, setMode] = useState<'home' | 'create' | 'join'>('home');
-  const [matchType, setMatchType] = useState<MatchType>(initialMatchType === '2xBoss' || initialMatchType === '3xBoss' ? initialMatchType : '2xBoss');
+  const lockedMatchType = initialMatchType === '2xBoss' || initialMatchType === '3xBoss' ? initialMatchType : undefined;
+  const [mode, setMode] = useState<'home' | 'create' | 'join'>(lockedMatchType ? 'create' : 'home');
+  const [matchType, setMatchType] = useState<MatchType>(lockedMatchType || '2xBoss');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [errMsg, setErrMsg] = useState('');
@@ -109,7 +110,7 @@ export default function BossOnlineLobby() {
 
   return (
     <Screen testID="boss-online-screen">
-      <Header title="Boss Online" onBack={() => mode === 'home' ? router.back() : setMode('home')} />
+      <Header title="Boss Online" onBack={() => mode === 'home' || lockedMatchType ? router.back() : setMode('home')} />
 
       <View style={styles.banner}>
         <Ionicons name="skull-outline" size={20} color={theme.colors.neon} />
@@ -130,15 +131,22 @@ export default function BossOnlineLobby() {
       {mode === 'create' ? (
         <View style={{ marginTop: 8 }}>
           <Text style={styles.label}>Modo MxH</Text>
-          <View style={styles.row}>
-            {(['2xBoss', '3xBoss'] as MatchType[]).map(item => (
-              <Chip key={item} label={item} active={matchType === item} onPress={() => setMatchType(item)} testID={`boss-online-match-${item}`} />
-            ))}
-          </View>
-          <Text style={styles.hint}>1xBoss é solo local. 2xBoss e 3xBoss usam sala online com Boss sincronizado. Tempo fixo: 30 min por turno.</Text>
+          {lockedMatchType ? (
+            <View style={styles.lockedBox}>
+              <Text style={styles.lockedText}>{lockedMatchType} • {labels[difficulty]}</Text>
+              <Text style={styles.hint}>A sala será criada com este modo e esta dificuldade, sem nova seleção dentro da luta.</Text>
+            </View>
+          ) : (
+            <View style={styles.row}>
+              {(['2xBoss', '3xBoss'] as MatchType[]).map(item => (
+                <Chip key={item} label={item} active={matchType === item} onPress={() => setMatchType(item)} testID={`boss-online-match-${item}`} />
+              ))}
+            </View>
+          )}
+          {!lockedMatchType ? <Text style={styles.hint}>1xBoss é solo local. 2xBoss e 3xBoss usam sala online com Boss sincronizado. Tempo fixo: 30 min por turno.</Text> : null}
           <Text style={styles.label}>Sala MxH</Text>
           <Button title="Gerar código da sala Boss" onPress={createRoom} loading={busy} testID="boss-online-create-btn" />
-          <Pressable onPress={() => setMode('home')} testID="boss-online-back-mode-btn"><Text style={styles.back}>Voltar</Text></Pressable>
+          <Pressable onPress={() => lockedMatchType ? router.back() : setMode('home')} testID="boss-online-back-mode-btn"><Text style={styles.back}>Voltar</Text></Pressable>
         </View>
       ) : null}
 
@@ -171,4 +179,6 @@ const styles = StyleSheet.create({
   hint: { color: theme.colors.textMuted, fontSize: 12, textAlign: 'center', marginTop: 8 },
   errorText: { color: theme.colors.danger, fontSize: 12, fontWeight: '700', marginBottom: 10 },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  lockedBox: { backgroundColor: 'rgba(255,59,0,0.08)', borderWidth: 1, borderColor: theme.colors.border, borderRadius: 10, padding: 10, marginBottom: 12 },
+  lockedText: { color: '#fff', fontSize: 14, fontWeight: '900', textAlign: 'center' },
 });
